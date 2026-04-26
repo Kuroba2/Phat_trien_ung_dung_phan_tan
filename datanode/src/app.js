@@ -1,8 +1,4 @@
-const path = require("path");
-
-const nodeInstance = process.env.NODE_INSTANCE || "1";
-const envFilePath = path.join(__dirname, `../../env/datanode_${nodeInstance}.env`);
-require("dotenv").config({ path: envFilePath });
+require("dotenv").config();
 
 const express = require("express");
 const { loadEnv } = require("./config/env");
@@ -32,8 +28,8 @@ const patientRoutes = buildPatientRoutes(pController);
 const app = express();
 app.use(express.json());
 
-app.use(buildReplicationRoutes(replicationController));
 app.use("/api", patientRoutes);
+app.use(buildReplicationRoutes(replicationController));
 
 app.get("/health", (_req, res) => {
   res.status(200).json({
