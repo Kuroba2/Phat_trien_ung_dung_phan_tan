@@ -18,7 +18,7 @@ function createReplicationService(config) {
   async function notifyNameNode(payload) {
     if (!config.namenodeUrl) return;
 
-    const endpoint = `${config.namenodeUrl}/update-metadata`;
+    const endpoint = `${config.namenodeUrl}/api/update-metadata`;
     await fetchJson(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

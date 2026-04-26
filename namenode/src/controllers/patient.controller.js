@@ -1,4 +1,5 @@
 const { poolPromise, sql } = require('../config/database');
+const axios = require('axios');
 
 // Biến đếm dùng cho thuật toán xoay vòng Round Robin
 let currentIndex = 0;
@@ -50,6 +51,37 @@ const patientController = {
             res.json({ message: "Cập nhật Metadata thành công!" });
         } catch (err) {
             res.status(500).json({ error: "Lỗi lưu Metadata: " + err.message });
+        }
+    },
+
+    // 3. Tìm kiếm phân tán: Gọi tất cả các node đang sống để tìm theo tên
+    searchPatient: async (req, res) => {
+        const { name } = req.query;
+        const availableNodes = Object.keys(global.nodeStatus).filter(
+            nodeIp => global.nodeStatus[nodeIp] === 'UP'
+        );
+
+        try {
+            // Gọi song song tới tất cả DataNode
+            const requests = availableNodes.map(node => 
+                axios.get(`${node}/api/search?name=${encodeURIComponent(name)}`, { timeout: 3000 })
+            );
+            
+            const results = await Promise.allSettled(requests);
+            
+            let allPatients = [];
+            results.forEach(result => {
+                if (result.status === 'fulfilled') {
+                    allPatients = [...allPatients, ...result.value.data];
+                }
+            });
+
+            // Loại bỏ trùng lặp nếu bệnh nhân có cả bản gốc và bản sao trả về
+            const uniquePatients = Array.from(new Map(allPatients.map(p => [p.patient_id, p])).values());
+
+            res.json(uniquePatients);
+        } catch (err) {
+            res.status(500).json({ error: "Lỗi thực hiện truy vấn phân tán: " + err.message });
         }
     }
 };

@@ -1,15 +1,28 @@
 const { getPool, sql } = require('../config/db');
 
+// Normalize data: handle both camelCase and snake_case field names
+function normalizePatientData(data) {
+	return {
+		patient_id: data.patient_id || data.patientId,
+		name: data.name,
+		symptom: data.symptom,
+		facility: data.facility,
+		is_primary: data.is_primary !== undefined ? data.is_primary : (data.isPrimary ?? true),
+		version: data.version ?? 1
+	};
+}
+
 async function createPatient(data) {
+	const normalized = normalizePatientData(data);
 	const pool = await getPool();
 
 	const request = pool.request();
-	request.input('patient_id', sql.VarChar(20), data.patientId);
-	request.input('name', sql.NVarChar(255), data.name);
-	request.input('symptom', sql.NVarChar(1000), data.symptom || null);
-	request.input('facility', sql.VarChar(50), data.facility);
-	request.input('is_primary', sql.Bit, data.isPrimary ?? true);
-	request.input('version', sql.Int, data.version ?? 1);
+	request.input('patient_id', sql.VarChar(20), normalized.patient_id);
+	request.input('name', sql.NVarChar(255), normalized.name);
+	request.input('symptom', sql.NVarChar(1000), normalized.symptom || null);
+	request.input('facility', sql.VarChar(50), normalized.facility);
+	request.input('is_primary', sql.Bit, normalized.is_primary);
+	request.input('version', sql.Int, normalized.version);
 
 	const result = await request.query(`
 		INSERT INTO dbo.patients (
@@ -82,15 +95,16 @@ async function searchByName(name) {
 }
 
 async function updatePatient(id, data) {
+	const normalized = normalizePatientData({ ...data, patient_id: id });
 	const pool = await getPool();
 
 	const request = pool.request();
-	request.input('patient_id', sql.VarChar(20), id);
-	request.input('name', sql.NVarChar(255), data.name);
-	request.input('symptom', sql.NVarChar(1000), data.symptom || null);
-	request.input('facility', sql.VarChar(50), data.facility);
-	request.input('is_primary', sql.Bit, data.isPrimary ?? true);
-	request.input('version', sql.Int, data.version ?? 1);
+	request.input('patient_id', sql.VarChar(20), normalized.patient_id);
+	request.input('name', sql.NVarChar(255), normalized.name);
+	request.input('symptom', sql.NVarChar(1000), normalized.symptom || null);
+	request.input('facility', sql.VarChar(50), normalized.facility);
+	request.input('is_primary', sql.Bit, normalized.is_primary);
+	request.input('version', sql.Int, normalized.version);
 
 	const result = await request.query(`
 		UPDATE dbo.patients
