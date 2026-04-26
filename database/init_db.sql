@@ -55,3 +55,43 @@ GO
 -- Nếu sau này từng database tăng lên rất lớn, có thể cân nhắc partition theo created_at
 -- hoặc facility để tối ưu quản lý dữ liệu và bảo trì index.
 -- Không nên partition theo name vì truy vấn tìm theo tên cần giữ thứ tự B-Tree trên cột name.
+
+-- ========================================
+-- BẢNG METADATA (NameNode sử dụng)
+-- ========================================
+-- Kiểm tra nếu bảng 'metadata' đã tồn tại thì xóa đi để tạo mới
+IF OBJECT_ID('dbo.metadata', 'U') IS NOT NULL
+BEGIN
+    DROP TABLE dbo.metadata;
+END;
+GO
+
+-- Lưu bản đồ vị trí bệnh nhân: Ai là Primary, ai là Replica
+CREATE TABLE dbo.metadata (
+    -- Mã bệnh nhân: Khóa chính
+    patient_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    
+    -- Đỉa chỉ máy chứa bản gốc (Primary) - URL của DataNode
+    primary_node VARCHAR(255) NOT NULL,
+    
+    -- Địa chỉ máy chứa bản sao (Replica) - URL của DataNode
+    replica_node VARCHAR(255),
+    
+    -- Trạng thái replica: 'healthy' hoặc 'degraded'
+    -- healthy: cả Primary và Replica đều có bản ghi
+    -- degraded: chỉ Primary có, Replica chưa nhân bản được
+    status VARCHAR(50) NOT NULL CONSTRAINT DF_metadata_status DEFAULT ('healthy'),
+    
+    -- Phiên bản: Giúp phát hiện mâu thuẫn khi đồng bộ
+    version INT NOT NULL CONSTRAINT DF_metadata_version DEFAULT (1),
+    
+    -- Thời gian cập nhật lần cuối
+    updated_at DATETIME2 NOT NULL CONSTRAINT DF_metadata_updated_at DEFAULT (SYSUTCDATETIME())
+);
+GO
+
+-- TẠO CẤU TRÚC INDEX TÌM KIẾM THEO TRẠNG THÁI
+CREATE NONCLUSTERED INDEX IX_metadata_status
+    ON dbo.metadata (status ASC)
+    INCLUDE (patient_id, primary_node, replica_node, version);
+GO

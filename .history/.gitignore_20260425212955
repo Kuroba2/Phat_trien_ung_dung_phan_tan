@@ -1,0 +1,15 @@
+# Thư viện Node.js (Rất nặng, không nên push)
+node_modules/
+**/node_modules/
+
+# File báo cáo tự động của AI (9 lỗi đã sửa, 4 vấn đề còn lại...)
+*VALIDATION*REPORT*
+*.txt
+
+# File cấu hình bảo mật
+.env
+env/*.env
+
+# File rác hệ thống
+.DS_Store
+Thumbs.db
