@@ -4,7 +4,7 @@ const { getPool, sql } = require("../config/db");
 function isValidReplicationPayload(body) {
   if (!body || typeof body !== "object") return false;
   if (!body.patient_id || typeof body.patient_id !== "string") return false;
-  if (typeof body.version !== "number") return false;
+  if (body.version === undefined || typeof body.version !== "number") return false;
   return true;
 }
 
@@ -19,24 +19,22 @@ function createReplicationController({ syncService }) {
     }
 
     try {
-      // 1. Lưu vào memory tracking (cho sync service)
       const result = upsertReplicaRecord(payload);
       
-      // 2. ⭐ PERSIST replica record vào database (không chỉ memory)
       const pool = await getPool();
       const request = pool.request();
       request.input('patient_id', sql.VarChar(20), payload.patient_id);
       request.input('name', sql.NVarChar(255), payload.name);
       request.input('symptom', sql.NVarChar(1000), payload.symptom || null);
       request.input('facility', sql.VarChar(50), payload.facility);
-      request.input('is_primary', sql.Bit, false); // Luôn là replica
+      request.input('is_primary', sql.Bit, false);
       request.input('version', sql.Int, payload.version || 1);
 
       await request.query(`
         MERGE INTO dbo.patients AS target
         USING (SELECT @patient_id as patient_id) AS source
         ON target.patient_id = source.patient_id
-        WHEN MATCHED THEN
+        WHEN MATCHED AND @version >= target.version THEN
           UPDATE SET
             name = @name,
             symptom = @symptom,

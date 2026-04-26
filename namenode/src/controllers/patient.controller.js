@@ -5,9 +5,7 @@ const axios = require('axios');
 let currentIndex = 0;
 
 const patientController = {
-    // 1. Điều phối Ghi: Chọn Node để lưu bệnh nhân mới
     getUploadLocation: async (req, res) => {
-        // Lấy danh sách IP các máy đang sống từ biến global (đã tạo ở app.js)
         const availableNodes = Object.keys(global.nodeStatus).filter(
             nodeIp => global.nodeStatus[nodeIp] === 'UP'
         );
@@ -16,18 +14,19 @@ const patientController = {
             return res.status(503).json({ error: "Tất cả chi nhánh đều đang sập!" });
         }
 
-        // Chọn máy Gốc (Primary) theo Round Robin 
         const primary = availableNodes[currentIndex % availableNodes.length];
         currentIndex++;
 
-        // Chọn máy tiếp theo trong danh sách làm Bản sao (Replica)
-        const replicaIndex = (availableNodes.indexOf(primary) + 1) % availableNodes.length;
-        const replica = availableNodes[replicaIndex];
+        let replica = null;
+        if (availableNodes.length > 1) {
+            const replicaIndex = (availableNodes.indexOf(primary) + 1) % availableNodes.length;
+            replica = availableNodes[replicaIndex];
+        }
 
-        // Trả về chỉ định cho Client
         res.json({
             primary: primary,
-            replica: replica
+            replica: replica,
+            available_nodes: availableNodes.length
         });
     },
 
@@ -41,11 +40,22 @@ const patientController = {
                 .input('id', sql.VarChar, patient_id)
                 .input('p_node', sql.VarChar, primary_node)
                 .input('r_node', sql.VarChar, replica_node)
-                .input('status', sql.VarChar, status) // healthy hoặc degraded
+                .input('status', sql.VarChar, status)
                 .input('ver', sql.Int, version || 1)
                 .query(`
-                    INSERT INTO metadata (patient_id, primary_node, replica_node, status, version)
-                    VALUES (@id, @p_node, @r_node, @status, @ver)
+                    MERGE INTO metadata AS target
+                    USING (SELECT @id as patient_id) AS source
+                    ON target.patient_id = source.patient_id
+                    WHEN MATCHED THEN
+                      UPDATE SET
+                        primary_node = @p_node,
+                        replica_node = @r_node,
+                        status = @status,
+                        version = @ver,
+                        updated_at = SYSUTCDATETIME()
+                    WHEN NOT MATCHED THEN
+                      INSERT (patient_id, primary_node, replica_node, status, version, updated_at)
+                      VALUES (@id, @p_node, @r_node, @status, @ver, SYSUTCDATETIME());
                 `);
 
             res.json({ message: "Cập nhật Metadata thành công!" });
@@ -54,7 +64,6 @@ const patientController = {
         }
     },
 
-    // 3. Tìm kiếm phân tán: Gọi tất cả các node đang sống để tìm theo tên
     searchPatient: async (req, res) => {
         const { name } = req.query;
         const availableNodes = Object.keys(global.nodeStatus).filter(
@@ -62,7 +71,6 @@ const patientController = {
         );
 
         try {
-            // Gọi song song tới tất cả DataNode
             const requests = availableNodes.map(node => 
                 axios.get(`${node}/api/search?name=${encodeURIComponent(name)}`, { timeout: 3000 })
             );
@@ -76,7 +84,6 @@ const patientController = {
                 }
             });
 
-            // Loại bỏ trùng lặp nếu bệnh nhân có cả bản gốc và bản sao trả về
             const uniquePatients = Array.from(new Map(allPatients.map(p => [p.patient_id, p])).values());
 
             res.json(uniquePatients);
