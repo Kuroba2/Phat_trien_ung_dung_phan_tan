@@ -19,6 +19,9 @@ const poolPromise = new sql.ConnectionPool(config)
         console.log(' NameNode đã kết nối SQL Server (Metadata) thành công!');
         return pool;
     })
-    .catch(err => console.log('❌ Lỗi kết nối SQL Server tại NameNode: ', err));
+    .catch(err => {
+        console.error('❌ Lỗi kết nối SQL Server tại NameNode: ', err);
+        throw err;
+    });
 
 module.exports = { sql, poolPromise };

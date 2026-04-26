@@ -1,32 +1,39 @@
 const patientController = (dbService, replicationService) => ({
-    // 1. Nhận hồ sơ từ Bác sĩ (Người 4 - [cite: 60])
     uploadPatient: async (req, res) => {
         const patientData = req.body;
-        const replicaNode = req.body.replica_node; // Client phải gửi replica_node từ NameNode's getUploadLocation
+        const replicaNode = req.body.replica_node;
+        const primaryNodeUrl = req.body.primary_node;
         
         try {
-            // Lưu vào SQL Server cục bộ (Người 2 - [cite: 45])
-            await dbService.createPatient({
+            const patientWithDefaults = {
                 ...patientData,
-                is_primary: true, // Đây là bản gốc
-                version: 1
+                is_primary: true,
+                version: patientData.version || 1
+            };
+
+            const savedPatient = await dbService.createPatient(patientWithDefaults);
+
+            res.status(201).json({ 
+                message: "Lưu bệnh nhân gốc thành công!",
+                patient_id: savedPatient.patient_id,
+                version: patientWithDefaults.version
             });
 
-            // Gọi máy Sao lưu (Người 3 - [cite: 128])
             if (replicaNode) {
-                await replicationService.retryReplication({
-                    targetNodeUrl: replicaNode,
-                    data: { ...patientData, is_primary: false }
+                replicationService.replicateWithRetry({
+                    patient: { ...savedPatient, version: patientWithDefaults.version },
+                    primaryNodeUrl: primaryNodeUrl,
+                    replicaNodeUrl: replicaNode,
+                    statusSource: "patient-upload"
+                }).catch(err => {
+                    console.error(`Background replication failed for ${savedPatient.patient_id}:`, err.message);
                 });
             }
-
-            res.status(201).json({ message: "Lưu bệnh nhân gốc thành công!" });
         } catch (err) {
             res.status(500).json({ error: err.message });
         }
     },
 
-    // 2. Lấy thông tin bệnh nhân theo ID (Người 4 - [cite: 61])
     getPatient: async (req, res) => {
         try {
             const patient = await dbService.getPatientById(req.query.id); 
@@ -37,7 +44,6 @@ const patientController = (dbService, replicationService) => ({
         }
     },
 
-    // 3. Tìm kiếm theo tên (gọi từ NameNode)
     searchPatient: async (req, res) => {
         try {
             const { name } = req.query;
