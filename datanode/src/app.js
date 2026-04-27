@@ -53,5 +53,5 @@ module.exports = {
   nodeRegistry,
   replicationService,
   syncService,
-  pController // Xuất thêm để test nếu cần
+  pController 
 };

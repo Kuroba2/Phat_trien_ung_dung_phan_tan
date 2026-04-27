@@ -66,34 +66,53 @@ const patientController = {
                 const patientData = { patient_id, name, symptom, facility };
                 if (primary_node) {
                     const cleanPrimaryUrl = primary_node.replace(/\/$/, ""); // Xóa dấu / ở cuối nếu có
-                    const primaryPath = `${cleanPrimaryUrl}/api/patients/upload-patient`;
-                    console.log(` Đang đẩy dữ liệu tới Primary: ${primaryPath}`);
-                    
-                    await axios.post(primaryPath, { ...patientData, is_primary: 1 }, { timeout: 5000 });
-                }
-                // Gửi sang Replica (nếu có)
-                if (replica_node) {
-                    const cleanReplicaUrl = replica_node.replace(/\/$/, "");
-                    const replicaPath = `${cleanReplicaUrl}/api/patients/upload-patient`;
-                    console.log(` Đang đẩy tới Replica: ${replicaPath}`);
-                    
-                    await axios.post(replicaPath, { ...patientData, is_primary: 0 }, axiosConfig);
-                }
-                console.log(` Đã đồng bộ bệnh nhân ${patient_id} xuống DataNodes`);
-            } catch (err) {
-            console.error(" Lỗi Metadata SQL:", err.message);
-            res.status(500).json({ error: "Lỗi lưu Metadata: " + err.message });
-        }
+                    const primaryPath = `${cleanPrimaryUrl}/api/upload-patient`;
+                    console.log(` NameNode gửi tới Primary: ${primaryPath}`);
+                    console.log(` Yêu cầu Primary sau đó gửi tiếp cho: ${replica_node}`);
 
-            res.json({ 
-                message: "Cập nhật Metadata hoàn tất!", 
-                sync_status: "Check NameNode terminal for details" 
-            });
-        } catch (err) {
-            console.error(" Lỗi Metadata SQL:", err.message);
-            res.status(500).json({ error: "Lỗi lưu Metadata: " + err.message });
-        }
-    },
+                    try {
+                        const resPrimary = await axios.post(primaryPath,
+                            { ...patientData, is_primary: 1,replica_url: replica_node },
+                            { timeout: 10000, headers: { 'ngrok-skip-browser-warning': 'true' } }
+                        );
+                        console.log(" Hệ thống phản hồi (Đã lưu xong cả Chính & Phụ):", resPrimary.data.message || "OK");
+                    } catch (err) {
+                        console.error(" Lỗi tại Primary:");
+                        if (err.response) {
+                            console.error(`   -> Mã lỗi: ${err.response.status}`);
+                            console.error(`   -> Thông báo từ máy bạn:`, err.response.data);
+                        } else {
+                            console.error(`   -> Không thể kết nối: ${err.message}`);
+                        }
+
+                    }
+                    
+                    
+                }
+
+                console.log(` Hoàn tất xử lý đồng bộ cho bệnh nhân: ${patient_id}`);
+
+            } catch (sendErr) {
+                // Đây là catch tổng cho toàn bộ quá trình xử lý logic gửi tin
+                const statusErr = sendErr.response ? sendErr.response.status : "OFFLINE";
+                console.error(` Lỗi hệ thống khi đồng bộ: ${statusErr} - ${sendErr.message}`);
+                if (statusErr === 404) {
+                    console.log(" Nhắc bạn: Kiểm tra xem DataNode đã có route '/api/upload-patient' chưa!");
+                }
+            }
+        
+                res.status(200).json({
+            message: "Cập nhật Metadata hoàn tất!",
+            sync_details: {
+                primary: primary_node, // Đây là link máy chính
+                replica: replica_node  // Đây là link máy phụ
+            }
+        });
+    } catch(err) {
+        console.error(" Lỗi Metadata SQL:", err.message);
+        res.status(500).json({ error: "Lỗi lưu Metadata: " + err.message });
+    }
+},
 
     searchPatient: async (req, res) => {
         const { name } = req.query;
@@ -102,16 +121,12 @@ const patientController = {
         );
 
         try {
-            const requests = availableNodes.map(node => {
-                const cleanNodeUrl = node.replace(/\/$/, "");
-                return axios.get(`${cleanNodeUrl}/api/patients/search?name=${encodeURIComponent(name)}`, { 
-                    headers: { 'ngrok-skip-browser-warning': 'true' },
-                    timeout: 5000 
-                });
-            });
-            
+            const requests = availableNodes.map(node =>
+                axios.get(`${node}/api/search?name=${encodeURIComponent(name)}`, { timeout: 3000 })
+            );
+
             const results = await Promise.allSettled(requests);
-            
+
             let allPatients = [];
             results.forEach(result => {
                 if (result.status === 'fulfilled') {
