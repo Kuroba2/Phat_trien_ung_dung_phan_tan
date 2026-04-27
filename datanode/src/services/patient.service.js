@@ -25,25 +25,27 @@ async function createPatient(data) {
 	request.input('version', sql.Int, normalized.version);
 
 	const result = await request.query(`
-		INSERT INTO dbo.patients (
-			patient_id,
-			name,
-			symptom,
-			facility,
-			is_primary,
-			version
-		)
-		OUTPUT INSERTED.patient_id, INSERTED.name, INSERTED.symptom, INSERTED.facility,
-			INSERTED.is_primary, INSERTED.created_at, INSERTED.version
-		VALUES (
-			@patient_id,
-			@name,
-			@symptom,
-			@facility,
-			@is_primary,
-			@version
-		);
-	`);
+        INSERT INTO dbo.patients (
+            patient_id,
+            name,
+            symptom,
+            facility,
+            is_primary,
+            version,
+            created_at  -- Thêm cột này vào đây
+        )
+        OUTPUT INSERTED.patient_id, INSERTED.name, INSERTED.symptom, INSERTED.facility,
+               INSERTED.is_primary, INSERTED.created_at, INSERTED.version
+        VALUES (
+            @patient_id,
+            @name,
+            @symptom,
+            @facility,
+            @is_primary,
+            @version,
+            GETDATE()  -- Thêm giá trị thời gian hiện tại vào đây
+        );
+    `);
 
 	return result.recordset[0];
 }

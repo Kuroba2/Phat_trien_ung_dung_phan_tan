@@ -1,7 +1,6 @@
 const { poolPromise, sql } = require('../config/database');
 const axios = require('axios');
 
-// Biến đếm dùng cho thuật toán xoay vòng Round Robin
 let currentIndex = 0;
 
 const patientController = {
@@ -30,11 +29,11 @@ const patientController = {
         });
     },
 
-    // 2. Cập nhật Metadata: Lưu bản đồ vào SQL Server sau khi DataNode ghi xong
     updateMetadata: async (req, res) => {
-        const { patient_id, primary_node, replica_node, status, version } = req.body;
+        const { patient_id, primary_node, replica_node, status, version, name, symptom, facility } = req.body;
 
         try {
+            // 1. Lưu vào SQL của NameNode (Metadata)
             const pool = await poolPromise;
             await pool.request()
                 .input('id', sql.VarChar, patient_id)
@@ -58,8 +57,38 @@ const patientController = {
                       VALUES (@id, @p_node, @r_node, @status, @ver, SYSUTCDATETIME());
                 `);
 
-            res.json({ message: "Cập nhật Metadata thành công!" });
+            // 2. Tự động đồng bộ xuống các DataNode
+            try {
+                const patientData = { patient_id, name, symptom, facility };
+                if (primary_node) {
+                    const cleanPrimaryUrl = primary_node.replace(/\/$/, ""); // Xóa dấu / ở cuối nếu có
+                    const primaryPath = `${cleanPrimaryUrl}/api/upload-patient`;
+                    console.log(` Đang đẩy dữ liệu tới Primary: ${primaryPath}`);
+                    
+                    await axios.post(primaryPath, { ...patientData, is_primary: 1 }, { timeout: 5000 });
+                }
+                // Gửi sang Replica (nếu có)
+                if (replica_node) {
+                    const cleanReplicaUrl = replica_node.replace(/\/$/, ""); // Xóa dấu / ở cuối nếu có
+                    const replicaPath = `${cleanReplicaUrl}/api/upload-patient`;
+                    console.log(` Đang đẩy dữ liệu tới Replica: ${replicaPath}`);
+                    await axios.post(`${replica_node}/api/upload-patient`, { ...patientData, is_primary: 0 }, { timeout: 3000 });
+                }
+                console.log(` Đã đồng bộ bệnh nhân ${patient_id} xuống DataNodes`);
+            } catch (sendErr) {
+                const statusErr = sendErr.response ? sendErr.response.status : "SERVER_OFFLINE";
+                console.log(" Lỗi đồng bộ xuống DataNode nhưng Metadata đã lưu:", sendErr.message);
+                if (statusErr === 404) {
+                    console.log(" Nhắc bạn: Đảo dòng app.use('/api', patientRoutes) lên TRÊN các router khác trong app.js máy DataNode!");
+                }
+            }
+
+            res.json({ 
+                message: "Cập nhật Metadata hoàn tất!", 
+                sync_status: "Check NameNode terminal for details" 
+            });
         } catch (err) {
+            console.error(" Lỗi Metadata SQL:", err.message);
             res.status(500).json({ error: "Lỗi lưu Metadata: " + err.message });
         }
     },
@@ -85,7 +114,6 @@ const patientController = {
             });
 
             const uniquePatients = Array.from(new Map(allPatients.map(p => [p.patient_id, p])).values());
-
             res.json(uniquePatients);
         } catch (err) {
             res.status(500).json({ error: "Lỗi thực hiện truy vấn phân tán: " + err.message });
