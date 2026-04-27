@@ -2,9 +2,9 @@ const express = require('express');
 const router = express.Router();
 const patientController = require('../controllers/patient.controller');
 
-router.get('/get-upload-location', patientController.getUploadLocation);
+router.get('/upload-location', patientController.getPatientUploadLocation);
 
-router.post('/update-metadata', patientController.updateMetadata);
+router.post('/upload', patientController.uploadPatient);
 
 router.get('/search', patientController.searchPatient);
 
