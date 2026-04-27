@@ -46,7 +46,20 @@ if (require.main === module) {
     console.log(`[DataNode] ${config.nodeId} đang chạy tại cổng ${config.port}`);
   });
 }
+app.use((req, res) => {
+    console.log(`------------------------------------------`);
+    console.log(`[${new Date().toLocaleTimeString()}] ❗ LOG CHECK 404 TẠI DATANODE:`);
+    console.log(`- Method: ${req.method}`);
+    console.log(`- URL nhận được: ${req.url}`);
+    console.log(`- Full Path: ${req.originalUrl}`);
+    console.log(`------------------------------------------`);
 
+    res.status(404).json({
+        error: "404 Not Found",
+        message: "Huy ơi, DataNode này không nhận ra cái link này!",
+        received_url: req.originalUrl
+    });
+});
 module.exports = {
   app,
   config,

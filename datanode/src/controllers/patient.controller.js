@@ -16,35 +16,33 @@ const patientController = (dbService, replicationService) => ({
             console.log(` Đang nhận dữ liệu BN: ${patientData.patient_id} (${is_primary ? 'MÁY CHÍNH' : 'MÁY PHỤ'})`);
             const existing = await dbService.getPatientById(patientData.patient_id);
             if (!existing) {
-            await dbService.createPatient(patientData);
-            console.log(` Đã lưu mới thành công.`);
-        } else {
-            console.log(` Bệnh nhân đã tồn tại, bỏ qua bước lưu để tránh lỗi PK.`);
-        }
-        
-        if (!existing) {
-            await dbService.createPatient(patientData);
-            console.log(`  Đã lưu mới thành công vào SQL máy mình.`);
-        } else {
-            console.log(`  Bệnh nhân đã tồn tại, bỏ qua bước lưu để chạy tiếp Pipeline.`);
-        }
+                await dbService.createPatient(patientData);
+                console.log(` Đã lưu mới thành công.`);
+            } else {
+                console.log(` Bệnh nhân đã tồn tại, bỏ qua bước lưu để tránh lỗi PK.`);
+            }
+
 
             // BƯỚC B: LOGIC PIPELINE - Nếu mình là máy CHÍNH và NameNode có chỉ định máy PHỤ
             if (is_primary && replica_url) {
                 console.log(` Pipeline: Đang chuyển tiếp dữ liệu sang máy phụ: ${replica_url}`);
-                
+
                 try {
                     const cleanUrl = replica_url.replace(/\/$/, "");
                     // Máy chính đóng vai trò "Shipper" gọi sang máy phụ
-                    const replicaRes = await axios.post(`${cleanUrl}/api/upload-patient`, {
+                    const replicaRes = await axios.post(`${cleanUrl}/api/patients/upload-patient`, {
                         ...patientData,
                         is_primary: 0,    // Đánh dấu cho máy kia biết nó là máy phụ
                         replica_url: null // Quan trọng: Ngắt chuỗi để không lặp vô tận
-                    }, { 
-                        timeout: 5000,
-                        headers: { 'ngrok-skip-browser-warning': 'true' } 
+                    }, {
+                        timeout: 10000,
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true',
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        }
                     });
-                    
+
                     console.log(" Máy phụ phản hồi:", replicaRes.data.message);
                 } catch (replicaErr) {
                     console.error(" Lỗi Pipeline: Không thể đẩy dữ liệu sang máy phụ!");
@@ -55,8 +53,8 @@ const patientController = (dbService, replicationService) => ({
 
             // BƯỚC C: Phản hồi về cho NameNode khi tất cả đã xong
             return res.status(201).json({
-                message: (is_primary && replica_url) 
-                    ? "Hệ thống đã lưu thành công trên cả chuỗi Chính & Phụ!" 
+                message: (is_primary && replica_url)
+                    ? "Hệ thống đã lưu thành công trên cả chuỗi Chính & Phụ!"
                     : "DataNode đã lưu dữ liệu thành công!",
                 patient_id: savedPatient.patient_id
             });
@@ -66,7 +64,7 @@ const patientController = (dbService, replicationService) => ({
             return res.status(500).json({ error: "Lỗi ghi Database: " + err.message });
         }
     },
-    
+
     // Đừng quên hàm searchPatient bên dưới nhé Huy!
 
     // 2. Hàm lấy chi tiết bệnh nhân (Giữ nguyên)
