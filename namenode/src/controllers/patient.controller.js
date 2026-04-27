@@ -59,29 +59,31 @@ const patientController = {
 
             // 2. Tự động đồng bộ xuống các DataNode
             try {
+                const axiosConfig = { 
+                    headers: { 'ngrok-skip-browser-warning': 'true' },
+                    timeout: 5000 
+                };
                 const patientData = { patient_id, name, symptom, facility };
                 if (primary_node) {
                     const cleanPrimaryUrl = primary_node.replace(/\/$/, ""); // Xóa dấu / ở cuối nếu có
-                    const primaryPath = `${cleanPrimaryUrl}/api/upload-patient`;
+                    const primaryPath = `${cleanPrimaryUrl}/api/patients/upload-patient`;
                     console.log(` Đang đẩy dữ liệu tới Primary: ${primaryPath}`);
                     
                     await axios.post(primaryPath, { ...patientData, is_primary: 1 }, { timeout: 5000 });
                 }
                 // Gửi sang Replica (nếu có)
                 if (replica_node) {
-                    const cleanReplicaUrl = replica_node.replace(/\/$/, ""); // Xóa dấu / ở cuối nếu có
-                    const replicaPath = `${cleanReplicaUrl}/api/upload-patient`;
-                    console.log(` Đang đẩy dữ liệu tới Replica: ${replicaPath}`);
-                    await axios.post(`${replica_node}/api/upload-patient`, { ...patientData, is_primary: 0 }, { timeout: 3000 });
+                    const cleanReplicaUrl = replica_node.replace(/\/$/, "");
+                    const replicaPath = `${cleanReplicaUrl}/api/patients/upload-patient`;
+                    console.log(` Đang đẩy tới Replica: ${replicaPath}`);
+                    
+                    await axios.post(replicaPath, { ...patientData, is_primary: 0 }, axiosConfig);
                 }
                 console.log(` Đã đồng bộ bệnh nhân ${patient_id} xuống DataNodes`);
-            } catch (sendErr) {
-                const statusErr = sendErr.response ? sendErr.response.status : "SERVER_OFFLINE";
-                console.log(" Lỗi đồng bộ xuống DataNode nhưng Metadata đã lưu:", sendErr.message);
-                if (statusErr === 404) {
-                    console.log(" Nhắc bạn: Đảo dòng app.use('/api', patientRoutes) lên TRÊN các router khác trong app.js máy DataNode!");
-                }
-            }
+            } catch (err) {
+            console.error(" Lỗi Metadata SQL:", err.message);
+            res.status(500).json({ error: "Lỗi lưu Metadata: " + err.message });
+        }
 
             res.json({ 
                 message: "Cập nhật Metadata hoàn tất!", 
@@ -100,9 +102,13 @@ const patientController = {
         );
 
         try {
-            const requests = availableNodes.map(node => 
-                axios.get(`${node}/api/search?name=${encodeURIComponent(name)}`, { timeout: 3000 })
-            );
+            const requests = availableNodes.map(node => {
+                const cleanNodeUrl = node.replace(/\/$/, "");
+                return axios.get(`${cleanNodeUrl}/api/patients/search?name=${encodeURIComponent(name)}`, { 
+                    headers: { 'ngrok-skip-browser-warning': 'true' },
+                    timeout: 5000 
+                });
+            });
             
             const results = await Promise.allSettled(requests);
             
