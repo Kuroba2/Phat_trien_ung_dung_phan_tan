@@ -38,7 +38,7 @@ setInterval(async () => {
             
             global.nodeStatus[node] = 'UP';
             // Bỏ comment dòng dưới nếu Huy muốn thấy nó báo thành công trên màn hình
-            // console.log(`✅ Node ${node} is ONLINE`); 
+            // console.log(` Node ${node} is ONLINE`); 
             
         } catch (error) {
             global.nodeStatus[node] = 'DOWN';
