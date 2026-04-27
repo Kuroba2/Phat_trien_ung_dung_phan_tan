@@ -29,8 +29,8 @@ const patientRoutes = buildPatientRoutes(pController);
 const app = express();
 app.use(express.json());
 
-app.use("/api", patientRoutes);
-app.use(buildReplicationRoutes(replicationController));
+app.use("/api/patients", patientRoutes); 
+app.use("/api/replication", buildReplicationRoutes(replicationController));
 
 app.get("/health", (_req, res) => {
   res.status(200).json({

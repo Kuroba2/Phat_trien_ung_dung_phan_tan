@@ -10,6 +10,7 @@ const patientController = (dbService, replicationService) => ({
             const patientData = {
                 ...data,
                 version: req.body.version || 1,
+                is_primary: req.body.is_primary // Để biết mình là chính hay phụ
             };
 
             console.log(` Đang nhận dữ liệu BN: ${patientData.patient_id} (${is_primary ? 'MÁY CHÍNH' : 'MÁY PHỤ'})`);
@@ -51,10 +52,12 @@ const patientController = (dbService, replicationService) => ({
             });
 
         } catch (err) {
-            console.error(" Lỗi tại DataNode:", err.message);
-            return res.status(500).json({ error: err.message });
+            console.error(" Lỗi tại DataNode khi xử lý ghi:", err.message);
+            return res.status(500).json({ error: "Lỗi ghi Database: " + err.message });
         }
     },
+    
+    // Đừng quên hàm searchPatient bên dưới nhé Huy!
 
     // 2. Hàm lấy chi tiết bệnh nhân (Giữ nguyên)
     getPatient: async (req, res) => {
