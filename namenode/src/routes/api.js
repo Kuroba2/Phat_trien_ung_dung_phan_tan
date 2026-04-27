@@ -8,4 +8,6 @@ router.post('/upload', patientController.uploadPatient);
 
 router.get('/search', patientController.searchPatient);
 
+router.get('/:patient_id', patientController.getPatientById);
+
 module.exports = router;
