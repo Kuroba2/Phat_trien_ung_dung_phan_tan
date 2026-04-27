@@ -4,7 +4,7 @@ const axios = require('axios');
 let currentIndex = 0;
 
 const patientController = {
-    getUploadLocation: async (req, res) => {
+    getPatientUploadLocation: async (req, res) => {
         const availableNodes = Object.keys(global.nodeStatus).filter(
             nodeIp => global.nodeStatus[nodeIp] === 'UP'
         );
@@ -29,7 +29,7 @@ const patientController = {
         });
     },
 
-    updateMetadata: async (req, res) => {
+    uploadPatient: async (req, res) => {
         const { patient_id, primary_node, replica_node, status, version, name, symptom, facility } = req.body;
 
         try {
@@ -72,14 +72,22 @@ const patientController = {
                             { timeout: 10000, headers: { 'ngrok-skip-browser-warning': 'true' } }
                         );
                         console.log(" Hệ thống phản hồi (Đã lưu xong cả Chính & Phụ):", resPrimary.data.message || "OK");
+                        return res.status(200).json({
+                            message: "Đã lưu thành công trên toàn bộ chuỗi Pipeline!",
+                            details: resPrimary.data
+                        });
                     } catch (err) {
                         console.error(" Lỗi tại Primary:");
-                        if (err.response) {
-                            console.error(`   -> Mã lỗi: ${err.response.status}`);
-                            console.error(`   -> Thông báo từ máy bạn:`, err.response.data);
-                        } else {
-                            console.error(`   -> Không thể kết nối: ${err.message}`);
-                        }
+                        
+                        // LẤY THÔNG TIN LỖI CHI TIẾT
+                        const errorStatus = err.response ? err.response.status : 500;
+                        const errorMessage = err.response ? err.response.data.error : err.message;
+
+                        // Phải trả về lỗi cho Client (Postman)
+                        return res.status(errorStatus).json({
+                            error: "Pipeline thất bại! Dữ liệu chưa được lưu đồng bộ.",
+                            reason: errorMessage
+                        });
 
                     }
                     

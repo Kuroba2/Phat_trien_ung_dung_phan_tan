@@ -13,10 +13,20 @@ const patientController = (dbService, replicationService) => ({
             };
 
             console.log(` Đang nhận dữ liệu BN: ${patientData.patient_id} (${is_primary ? 'MÁY CHÍNH' : 'MÁY PHỤ'})`);
-
-            // BƯỚC A: Lưu vào DB cục bộ của chính máy này thông qua dbService
-            const savedPatient = await dbService.createPatient(patientData);
-            console.log(` Đã lưu thành công vào SQL máy mình.`);
+            const existing = await dbService.getPatientById(patientData.patient_id);
+            if (!existing) {
+            await dbService.createPatient(patientData);
+            console.log(` Đã lưu mới thành công.`);
+        } else {
+            console.log(` Bệnh nhân đã tồn tại, bỏ qua bước lưu để tránh lỗi PK.`);
+        }
+        
+        if (!existing) {
+            await dbService.createPatient(patientData);
+            console.log(`  Đã lưu mới thành công vào SQL máy mình.`);
+        } else {
+            console.log(`  Bệnh nhân đã tồn tại, bỏ qua bước lưu để chạy tiếp Pipeline.`);
+        }
 
             // BƯỚC B: LOGIC PIPELINE - Nếu mình là máy CHÍNH và NameNode có chỉ định máy PHỤ
             if (is_primary && replica_url) {
