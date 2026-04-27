@@ -1,32 +1,62 @@
 const axios = require("axios");
 
 const patientController = (dbService, replicationService) => ({
-    // 1. Hàm này chỉ làm nhiệm vụ LƯU VÀO DATABASE CỦA DATANODE
+    // 1. Hàm đã nâng cấp: Lưu xong tự động đẩy sang máy tiếp theo trong chuỗi
     uploadPatient: async (req, res) => {
         try {
-            // Nhận dữ liệu từ NameNode bắn sang
+            // Lấy thêm replica_url và is_primary từ NameNode gửi sang
+            const { replica_url, is_primary, ...data } = req.body;
+
             const patientData = {
-                ...req.body,
+                ...data,
                 version: req.body.version || 1,
             };
 
-            console.log(` Đang nhận dữ liệu bệnh nhân: ${patientData.patient_id}`);
+            console.log(` Đang nhận dữ liệu BN: ${patientData.patient_id} (${is_primary ? 'MÁY CHÍNH' : 'MÁY PHỤ'})`);
 
-            // Lưu vào DB cục bộ của chi nhánh thông qua dbService
+            // BƯỚC A: Lưu vào DB cục bộ của chính máy này thông qua dbService
             const savedPatient = await dbService.createPatient(patientData);
+            console.log(` Đã lưu thành công vào SQL máy mình.`);
 
+            // BƯỚC B: LOGIC PIPELINE - Nếu mình là máy CHÍNH và NameNode có chỉ định máy PHỤ
+            if (is_primary && replica_url) {
+                console.log(` Pipeline: Đang chuyển tiếp dữ liệu sang máy phụ: ${replica_url}`);
+                
+                try {
+                    const cleanUrl = replica_url.replace(/\/$/, "");
+                    // Máy chính đóng vai trò "Shipper" gọi sang máy phụ
+                    const replicaRes = await axios.post(`${cleanUrl}/api/upload-patient`, {
+                        ...patientData,
+                        is_primary: 0,    // Đánh dấu cho máy kia biết nó là máy phụ
+                        replica_url: null // Quan trọng: Ngắt chuỗi để không lặp vô tận
+                    }, { 
+                        timeout: 5000,
+                        headers: { 'ngrok-skip-browser-warning': 'true' } 
+                    });
+                    
+                    console.log(" Máy phụ phản hồi:", replicaRes.data.message);
+                } catch (replicaErr) {
+                    console.error(" Lỗi Pipeline: Không thể đẩy dữ liệu sang máy phụ!");
+                    // Nếu muốn Strong Consistency, ta có thể throw lỗi ở đây để NameNode biết
+                    throw new Error("Lỗi sao chép dữ liệu sang máy phụ: " + replicaErr.message);
+                }
+            }
+
+            // BƯỚC C: Phản hồi về cho NameNode khi tất cả đã xong
             return res.status(201).json({
-                message: "DataNode đã lưu dữ liệu thành công!",
+                message: (is_primary && replica_url) 
+                    ? "Hệ thống đã lưu thành công trên cả chuỗi Chính & Phụ!" 
+                    : "DataNode đã lưu dữ liệu thành công!",
                 patient_id: savedPatient.patient_id
             });
+
         } catch (err) {
             console.error(" Lỗi tại DataNode:", err.message);
             return res.status(500).json({ error: err.message });
         }
     },
 
-
-    // 2. Hàm lấy chi tiết bệnh nhân 
+    // 2. Hàm lấy chi tiết bệnh nhân (Giữ nguyên)
     getPatient: async (req, res) => {
         try {
             const patient = await dbService.getPatientById(req.query.id);
@@ -37,9 +67,7 @@ const patientController = (dbService, replicationService) => ({
         }
     },
 
-
-
-    // 3. Hàm tìm kiếm phục vụ truy vấn phân tán 
+    // 3. Hàm tìm kiếm phục vụ truy vấn phân tán (Giữ nguyên)
     searchPatient: async (req, res) => {
         try {
             const { name } = req.query;
