@@ -13,3 +13,5 @@ env/*.env
 # File rác hệ thống
 .DS_Store
 Thumbs.db
+
+.history/
