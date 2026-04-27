@@ -25,7 +25,8 @@ const patientController = (dbService, replicationService) => ({
         }
     },
 
-    // 2. Hàm lấy chi tiết bệnh nhân (giữ nguyên)
+
+    // 2. Hàm lấy chi tiết bệnh nhân 
     getPatient: async (req, res) => {
         try {
             const patient = await dbService.getPatientById(req.query.id);
@@ -36,7 +37,9 @@ const patientController = (dbService, replicationService) => ({
         }
     },
 
-    // 3. Hàm tìm kiếm phục vụ truy vấn phân tán (giữ nguyên)
+
+
+    // 3. Hàm tìm kiếm phục vụ truy vấn phân tán 
     searchPatient: async (req, res) => {
         try {
             const { name } = req.query;
