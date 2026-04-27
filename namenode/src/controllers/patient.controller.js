@@ -59,6 +59,10 @@ const patientController = {
 
             // 2. Tự động đồng bộ xuống các DataNode
             try {
+                const axiosConfig = { 
+                    headers: { 'ngrok-skip-browser-warning': 'true' },
+                    timeout: 5000 
+                };
                 const patientData = { patient_id, name, symptom, facility };
                 if (primary_node) {
                     const cleanPrimaryUrl = primary_node.replace(/\/$/, ""); // Xóa dấu / ở cuối nếu có
