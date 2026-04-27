@@ -83,9 +83,12 @@ const patientController = {
                 }
             }
 
-            res.json({ 
+            res.status(200).json({ 
                 message: "Cập nhật Metadata hoàn tất!", 
-                sync_status: "Check NameNode terminal for details" 
+                sync_details: {
+                    primary: primary_node, // Đây là link máy chính
+                    replica: replica_node  // Đây là link máy phụ
+                } 
             });
         } catch (err) {
             console.error(" Lỗi Metadata SQL:", err.message);
