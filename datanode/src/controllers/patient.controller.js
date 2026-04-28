@@ -56,7 +56,7 @@ const patientController = (dbService, replicationService) => ({
                 message: (is_primary && replica_url)
                     ? "Hệ thống đã lưu thành công trên cả chuỗi Chính & Phụ!"
                     : "DataNode đã lưu dữ liệu thành công!",
-                patient_id: savedPatient.patient_id
+                patient_id:patientData.patient_id
             });
 
         } catch (err) {
