@@ -1,7 +1,7 @@
 const axios = require("axios");
 
 const patientController = (dbService, replicationService) => ({
-    // 1. Hàm đã nâng cấp: Lưu xong tự động đẩy sang máy tiếp theo trong chuỗi
+    // Lưu xong tự động đẩy sang máy tiếp theo trong chuỗi
     uploadPatient: async (req, res) => {
         try {
             // Lấy thêm replica_url và is_primary từ NameNode gửi sang
@@ -33,7 +33,7 @@ const patientController = (dbService, replicationService) => ({
                     const replicaRes = await axios.post(`${cleanUrl}/api/patients/upload-patient`, {
                         ...patientData,
                         is_primary: 0,    // Đánh dấu cho máy kia biết nó là máy phụ
-                        replica_url: null // Quan trọng: Ngắt chuỗi để không lặp vô tận
+                        replica_url: null // Ngắt chuỗi để không lặp vô tận
                     }, {
                         timeout: 10000,
                         headers: {
@@ -46,7 +46,6 @@ const patientController = (dbService, replicationService) => ({
                     console.log(" Máy phụ phản hồi:", replicaRes.data.message);
                 } catch (replicaErr) {
                     console.error(" Lỗi Pipeline: Không thể đẩy dữ liệu sang máy phụ!");
-                    // Nếu muốn Strong Consistency, ta có thể throw lỗi ở đây để NameNode biết
                     throw new Error("Lỗi sao chép dữ liệu sang máy phụ: " + replicaErr.message);
                 }
             }
@@ -64,8 +63,6 @@ const patientController = (dbService, replicationService) => ({
             return res.status(500).json({ error: "Lỗi ghi Database: " + err.message });
         }
     },
-
-    // Đừng quên hàm searchPatient bên dưới nhé Huy!
 
     // 2. Hàm lấy chi tiết bệnh nhân (Giữ nguyên)
     getPatient: async (req, res) => {

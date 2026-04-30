@@ -75,7 +75,7 @@ CREATE TABLE dbo.metadata (
     primary_node VARCHAR(255) NOT NULL,
     
     -- Địa chỉ máy chứa bản sao (Replica) - URL của DataNode
-    replica_node VARCHAR(255),
+    replica_node VARCHAR(255) Null,
     
     -- Trạng thái replica: 'healthy' hoặc 'degraded'
     -- healthy: cả Primary và Replica đều có bản ghi

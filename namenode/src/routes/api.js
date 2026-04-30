@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const patientController = require('../controllers/patient.controller');
 
-router.get('/upload-location', patientController.getPatientUploadLocation);
+//router.get('/upload-location', patientController.getPatientUploadLocation);
+router.get('/status', patientController.checkSystemStatus);
 
 router.post('/upload', patientController.uploadPatient);
 
