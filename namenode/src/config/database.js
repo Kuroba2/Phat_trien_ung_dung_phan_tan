@@ -20,7 +20,7 @@ const poolPromise = new sql.ConnectionPool(config)
         return pool;
     })
     .catch(err => {
-        console.error('❌ Lỗi kết nối SQL Server tại NameNode: ', err);
+        console.error(' Lỗi kết nối SQL Server tại NameNode: ', err);
         throw err;
     });
 

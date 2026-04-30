@@ -3,125 +3,132 @@ const axios = require('axios');
 let currentIndex = 0;
 
 const patientController = {
-    getPatientUploadLocation: async (req, res) => {
-        const availableNodes = Object.keys(global.nodeStatus).filter(
-            nodeIp => global.nodeStatus[nodeIp] === 'UP'
-        );
+    // getPatientUploadLocation: async (req, res) => {
+    //     const availableNodes = Object.keys(global.nodeStatus).filter(
+    //         nodeIp => global.nodeStatus[nodeIp] === 'UP'
+    //     );
 
-        if (availableNodes.length === 0) {
-            return res.status(503).json({ error: "Tất cả chi nhánh đều đang sập!" });
-        }
+    //     if (availableNodes.length === 0) {
+    //         return res.status(503).json({ error: "Tất cả chi nhánh đều đang sập!" });
+    //     }
 
-        const primary = availableNodes[currentIndex % availableNodes.length];
-        currentIndex++;
+    //     const primary = availableNodes[currentIndex % availableNodes.length];
+    //     currentIndex++;
 
-        let replica = null;
-        if (availableNodes.length > 1) {
-            const replicaIndex = (availableNodes.indexOf(primary) + 1) % availableNodes.length;
-            replica = availableNodes[replicaIndex];
-        }
+    //     let replica = null;
+    //     if (availableNodes.length > 1) {
+    //         const replicaIndex = (availableNodes.indexOf(primary) + 1) % availableNodes.length;
+    //         replica = availableNodes[replicaIndex];
+    //     }
 
-        res.json({
-            primary: primary,
-            replica: replica,
-            available_nodes: availableNodes.length
-        });
-    },
+    //     res.json({
+    //         primary: primary,
+    //         replica: replica,
+    //         available_nodes: availableNodes.length
+    //     });
+    // },
 
+
+    //tạo mới bệnh nhân (đồng thời cập nhật Metadata trên NameNode và tự động đồng bộ xuống DataNode)
     uploadPatient: async (req, res) => {
+        const { patient_id, name, symptom, facility } = req.body;
+        const patientData = { patient_id, name, symptom, facility };
 
         try {
-            const { patient_id, primary_node, replica_node, status, version, name, symptom, facility } = req.body;
-
-
-            // 1. Lưu vào SQL của NameNode (Metadata)
+            // --- BƯỚC 1: KIỂM TRA TRÙNG LẶP TRÊN METADATA TRƯỚC ---
             const pool = await poolPromise;
+
             const checkExist = await pool.request()
                 .input('id', sql.VarChar, patient_id)
                 .query("SELECT patient_id FROM dbo.metadata WHERE patient_id = @id");
 
             if (checkExist.recordset.length > 0) {
-                return res.status(400).json({
-                    error: "Conflict",
-                    message: `Mã bệnh nhân ${patient_id} đã tồn tại trên hệ thống!`
-                });
+                return res.status(400).json({ error: "Conflict", message: `Mã bệnh nhân ${patient_id} đã tồn tại!` });
             }
+
+            // --- BƯỚC 2: TỰ ĐỘNG CHỌN MÁY SỐNG (AUTO-DISCOVERY) ---
+            // Giả sử global.nodeStatus lưu trạng thái từ Heartbeat
+            let aliveNodes = Object.keys(global.nodeStatus || {}).filter(ip => global.nodeStatus[ip] === 'UP');
+
+            if (aliveNodes.length === 0) {
+                return res.status(503).json({ error: "Service Unavailable", message: "Không có DataNode nào online!" });
+            }
+
+            // Ưu tiên chọn máy nhẹ tải (Random hoặc Round Robin đơn giản)
+            aliveNodes.sort(() => Math.random() - 0.5);
+
+            let primaryNode = null;
+            let replicaNode = null;
+            let logs = [];
+
+            // --- BƯỚC 3: GỬI XUỐNG DATANODE (THỰC THI TRƯỚC) ---
+            //Tầng 2 gửi dữ liệu xuống
+            // 3.1 Tìm và ghi máy Chính (Primary)
+            for (let i = 0; i < aliveNodes.length; i++) {
+                try {
+                    const targetUrl = aliveNodes[i].replace(/\/$/, "");
+                    await axios.post(`${targetUrl}/api/patients/upload-patient`,
+                        { ...patientData, is_primary: 1 },
+                        { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
+                    );
+                    primaryNode = aliveNodes[i];
+                    aliveNodes.splice(i, 1); // Đã chọn xong thì loại khỏi danh sách chờ cho máy phụ
+                    break;
+                } catch (err) {
+                    logs.push(`Thử Primary tại ${aliveNodes[i]} thất bại: ${err.message}`);
+                }
+            }
+
+            if (!primaryNode) {
+                return res.status(500).json({ error: "Write Failed", message: "Tất cả các máy đều từ chối ghi dữ liệu!", logs });
+            }
+
+            // 3.2 Tìm và ghi máy Phụ (Replica) - Nếu còn máy khác sống
+            for (let i = 0; i < aliveNodes.length; i++) {
+                try {
+                    const targetUrl = aliveNodes[i].replace(/\/$/, "");
+                    await axios.post(`${targetUrl}/api/patients/upload-patient`,
+                        { ...patientData, is_primary: 0 },
+                        { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
+                    );
+                    replicaNode = aliveNodes[i];
+                    break;
+                } catch (err) {
+                    logs.push(`Thử Replica tại ${aliveNodes[i]} thất bại, đang tìm máy tiếp theo...`);
+                }
+            }
+
+            // --- BƯỚC 4: GHI VÀO METADATA 
             await pool.request()
                 .input('id', sql.VarChar, patient_id)
-                .input('p_node', sql.VarChar, primary_node)
-                .input('r_node', sql.VarChar, replica_node)
-                .input('status', sql.VarChar, status)
-                .input('ver', sql.Int, version || 1)
+                .input('p_node', sql.VarChar, primaryNode)
+                .input('r_node', sql.VarChar, replicaNode || null) // Lưu NULL nếu không có máy phụ
+                .input('status', sql.VarChar, 'Active')
                 .query(`
-                    INSERT INTO dbo.metadata (patient_id, primary_node, replica_node, status, version, updated_at)
-                    VALUES (@id, @p_node, @r_node, @status, @ver, SYSUTCDATETIME());
-        `);
+                INSERT INTO dbo.metadata (patient_id, primary_node, replica_node, status, version, updated_at)
+                VALUES (@id, @p_node, @r_node, @status, 1, SYSUTCDATETIME());
+            `);
 
-            // 2. Tự động đồng bộ xuống các DataNode
-            try {
-                const axiosConfig = {
-                    headers: { 'ngrok-skip-browser-warning': 'true' },
-                    timeout: 5000
-                };
-                const patientData = { patient_id, name, symptom, facility };
-                if (primary_node) {
-                    const cleanPrimaryUrl = primary_node.replace(/\/$/, ""); // Xóa dấu / ở cuối nếu có
-                    const primaryPath = `${cleanPrimaryUrl}/api/patients/upload-patient`;
-                    console.log(` NameNode gửi tới Primary: ${primaryPath}`);
-                    console.log(` Yêu cầu Primary sau đó gửi tiếp cho: ${replica_node}`);
-
-                    try {
-                        const resPrimary = await axios.post(primaryPath,
-                            { ...patientData, is_primary: 1, replica_url: replica_node },
-                            { timeout: 10000, headers: { 'ngrok-skip-browser-warning': 'true' } }
-                        );
-                        console.log(" Hệ thống phản hồi (Đã lưu xong cả Chính & Phụ):", resPrimary.data.message || "OK");
-                        return res.status(200).json({
-                            message: "Đã lưu thành công trên toàn bộ chuỗi Pipeline!",
-                            details: resPrimary.data
-                        });
-                    } catch (err) {
-                        console.error(" Lỗi tại Primary:");
-
-                        // LẤY THÔNG TIN LỖI CHI TIẾT
-                        const errorStatus = err.response ? err.response.status : 500;
-                        const errorMessage = err.response ? err.response.data.error : err.message;
-
-                        // Phải trả về lỗi cho Client (Postman)
-                        return res.status(errorStatus).json({
-                            error: "Pipeline thất bại! Dữ liệu chưa được lưu đồng bộ.",
-                            reason: errorMessage
-                        });
-
-                    }
-
-
-                }
-
-                console.log(` Hoàn tất xử lý đồng bộ cho bệnh nhân: ${patient_id}`);
-
-            } catch (sendErr) {
-                // Đây là catch tổng cho toàn bộ quá trình xử lý logic gửi tin
-                const statusErr = sendErr.response ? sendErr.response.status : "OFFLINE";
-                console.error(` Lỗi hệ thống khi đồng bộ: ${statusErr} - ${sendErr.message}`);
-                if (statusErr === 404) {
-                    console.log(" Nhắc bạn: Kiểm tra xem DataNode đã có route '/api/upload-patient' chưa!");
-                }
-            }
-
-            res.status(200).json({
-                message: "Cập nhật Metadata hoàn tất!",
-                sync_details: {
-                    primary: primary_node, // Đây là link máy chính
-                    replica: replica_node  // Đây là link máy phụ
-                }
+            // --- BƯỚC 5: TRẢ KẾT QUẢ CHO POSTMAN ---
+            res.status(201).json({
+                status: "Success",
+                message: replicaNode ? "Đã lưu thành công (Chính & Phụ)" : "Lưu thành công (Chỉ có máy chính, không có bản sao)",
+                assigned_nodes: { primary: primaryNode, replica: replicaNode },
+                logs: logs
             });
+
         } catch (err) {
-            console.error(" Lỗi Metadata SQL:", err.message);
-            res.status(500).json({ error: "Lỗi lưu Metadata: " + err.message });
+            console.error("Lỗi hệ thống:", err.message);
+            res.status(500).json({ error: "Lỗi NameNode: " + err.message });
         }
     },
 
+
+
+
+
+
+    //tìm kiếm bệnh nhân theo tên (có thể trả về nhiều kết quả)
     searchPatient: async (req, res) => {
         try {
             const { name } = req.query;
@@ -172,13 +179,15 @@ const patientController = {
             res.status(500).json({ error: "Lỗi thực hiện truy vấn phân tán: " + err.message });
         }
     },
+
+    //Tìm kiếm bệnh nhân theo ID (có cơ chế Failover sang máy phụ nếu máy chính không phản hồi)
     getPatientById: async (req, res) => {
         // Khai báo metadata bên ngoài try để khối catch phía dưới có thể truy cập được khi cần Failover
         let metadata = [];
         const { patient_id } = req.params;
 
         try {
-            console.log(`🔍 NameNode đang tra Metadata cho bệnh nhân: ${patient_id}`);
+            console.log(` NameNode đang tra Metadata cho bệnh nhân: ${patient_id}`);
 
             // 1. Lấy Metadata từ SQL Server (NameNode)
             const pool = await poolPromise;
@@ -252,7 +261,45 @@ const patientController = {
                 detail: error.message
             });
         }
+    },
+
+    
+    checkSystemStatus: async (req, res) => {
+        try {
+            // Giả sử Huy có danh sách các node trong biến global hoặc config
+            const nodes = [
+                { id: 'DataNode_1', url: 'https://thinning-recount-bondless.ngrok-free.dev' },
+                { id: 'DataNode_2', url: 'https://cusp-broadly-smooth.ngrok-free.dev' },
+                { id: 'DataNode_3', url: 'https://harmonica-defuse-tapping.ngrok-free.dev' }
+            ];
+
+            const statusReport = [];
+
+            for (let node of nodes) {
+                try {
+                    // Thử gọi một lệnh ping đơn giản sang DataNode
+                    await axios.get(`${node.url}/ping`, {
+                        timeout: 3000, // Tăng lên 3s vì ngrok thỉnh thoảng hơi chậm
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true' // "Chìa khóa" thần thánh ở đây
+                        }
+                    });
+                    statusReport.push({ id: node.id, status: 'Online' });
+                } catch (err) {
+                    statusReport.push({ id: node.id, status: 'Offline' });
+                }
+            }
+
+            res.json({
+                system: "Hệ thống lưu trữ phân tán",
+                timestamp: new Date().toLocaleString(),
+                nodes: statusReport
+            });
+        } catch (error) {
+            res.status(500).json({ error: error.message });
+        }
     }
+
 }
 
 module.exports = patientController;
