@@ -44,7 +44,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.use("/api/patients", patientRoutes);
+app.use("/api", patientRoutes);
 app.use("/api/replication", buildReplicationRoutes(replicationController));
 
 

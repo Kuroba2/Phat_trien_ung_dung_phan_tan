@@ -67,7 +67,7 @@ const patientController = {
             for (let i = 0; i < aliveNodes.length; i++) {
                 try {
                     const targetUrl = aliveNodes[i].replace(/\/$/, "");
-                    await axios.post(`${targetUrl}/api/patients/upload-patient`,
+                    await axios.post(`${targetUrl}/api/upload-patient`,
                         { ...patientData, is_primary: 1 },
                         { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
                     );
@@ -87,7 +87,7 @@ const patientController = {
             for (let i = 0; i < aliveNodes.length; i++) {
                 try {
                     const targetUrl = aliveNodes[i].replace(/\/$/, "");
-                    await axios.post(`${targetUrl}/api/patients/upload-patient`,
+                    await axios.post(`${targetUrl}/api/upload-patient`,
                         { ...patientData, is_primary: 0 },
                         { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
                     );
@@ -146,7 +146,7 @@ const patientController = {
             // 2. Gửi yêu cầu tìm kiếm song song
             const requests = nodeList.map(node =>
                 // NHỚ: Thêm /patients/ vào đường dẫn cho khớp với DataNode
-                axios.get(`${node}/api/patients/search?name=${encodeURIComponent(name)}`, {
+                axios.get(`${node}/api/search?name=${encodeURIComponent(name)}`, {
                     timeout: 5000,
                     headers: { 'ngrok-skip-browser-warning': 'true' }
                 })
@@ -205,7 +205,7 @@ const patientController = {
 
             const meta = metadata[0];
             const primaryUrl = meta.primary_node.replace(/\/$/, "");
-            const targetUrl = `${primaryUrl}/api/patients/view-patient?id=${patient_id}`;
+            const targetUrl = `${primaryUrl}/api/view-patient?id=${patient_id}`;
 
             try {
                 console.log(` Đang gọi máy CHÍNH: ${targetUrl}`);
@@ -231,7 +231,7 @@ const patientController = {
 
                 if (meta.replica_node) {
                     const replicaUrl = meta.replica_node.replace(/\/$/, "");
-                    const replicaTargetUrl = `${replicaUrl}/api/patients/view-patient?id=${patient_id}`;
+                    const replicaTargetUrl = `${replicaUrl}/api/view-patient?id=${patient_id}`;
 
                     console.log(` NameNode đang gọi dự phòng sang máy PHỤ: ${replicaTargetUrl}`);
 
@@ -265,40 +265,43 @@ const patientController = {
 
     
     checkSystemStatus: async (req, res) => {
-        try {
-            // Giả sử Huy có danh sách các node trong biến global hoặc config
-            const nodes = [
-                { id: 'DataNode_1', url: 'https://thinning-recount-bondless.ngrok-free.dev' },
-                { id: 'DataNode_2', url: 'https://cusp-broadly-smooth.ngrok-free.dev' },
-                { id: 'DataNode_3', url: 'https://harmonica-defuse-tapping.ngrok-free.dev' }
-            ];
+    try {
+        const nodes = [
+            { id: 'DataNode_1', url: 'https://thinning-recount-bondless.ngrok-free.dev' },
+            { id: 'DataNode_2', url: 'https://cusp-broadly-smooth.ngrok-free.dev' },
+            { id: 'DataNode_3', url: 'https://harmonica-defuse-tapping.ngrok-free.dev' }
+        ];
 
-            const statusReport = [];
+        const statusReport = [];
 
-            for (let node of nodes) {
-                try {
-                    // Thử gọi một lệnh ping đơn giản sang DataNode
-                    await axios.get(`${node.url}/ping`, {
-                        timeout: 3000, // Tăng lên 3s vì ngrok thỉnh thoảng hơi chậm
-                        headers: {
-                            'ngrok-skip-browser-warning': 'true' // "Chìa khóa" thần thánh ở đây
-                        }
-                    });
-                    statusReport.push({ id: node.id, status: 'Online' });
-                } catch (err) {
-                    statusReport.push({ id: node.id, status: 'Offline' });
-                }
+        for (let node of nodes) {
+            try {
+                // Gửi yêu cầu kèm theo header để vượt qua ngrok
+                await axios.get(`${node.url}/ping`, {
+                    timeout: 5000, // Tăng lên 5s cho chắc chắn
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true',
+                        'User-Agent': 'axios' 
+                    }
+                });
+                statusReport.push({ id: node.id, status: 'Online ✅' });
+            } catch (err) {
+                // QUAN TRỌNG: Dòng này sẽ hiện lỗi thật sự lên Terminal của NameNode
+                console.log(`❌ Lỗi kết nối tới ${node.id} (${node.url}):`, err.message);
+                
+                statusReport.push({ id: node.id, status: 'Offline ❌' });
             }
-
-            res.json({
-                system: "Hệ thống lưu trữ phân tán",
-                timestamp: new Date().toLocaleString(),
-                nodes: statusReport
-            });
-        } catch (error) {
-            res.status(500).json({ error: error.message });
         }
+
+        res.json({
+            system: "Hệ thống lưu trữ phân tán",
+            timestamp: new Date().toLocaleString(),
+            nodes: statusReport
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
+}
 
 }
 

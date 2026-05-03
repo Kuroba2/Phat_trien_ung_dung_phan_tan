@@ -30,7 +30,7 @@ const patientController = (dbService, replicationService) => ({
                 try {
                     const cleanUrl = replica_url.replace(/\/$/, "");
                     // Máy chính đóng vai trò "Shipper" gọi sang máy phụ
-                    const replicaRes = await axios.post(`${cleanUrl}/api/patients/upload-patient`, {
+                    const replicaRes = await axios.post(`${cleanUrl}/api/upload-patient`, {
                         ...patientData,
                         is_primary: 0,    // Đánh dấu cho máy kia biết nó là máy phụ
                         replica_url: null // Ngắt chuỗi để không lặp vô tận
