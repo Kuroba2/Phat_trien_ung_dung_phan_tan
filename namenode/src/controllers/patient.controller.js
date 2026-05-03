@@ -284,12 +284,12 @@ const patientController = {
                         'User-Agent': 'axios' 
                     }
                 });
-                statusReport.push({ id: node.id, status: 'Online ✅' });
+                statusReport.push({ id: node.id, status: 'Online ' });
             } catch (err) {
                 // QUAN TRỌNG: Dòng này sẽ hiện lỗi thật sự lên Terminal của NameNode
-                console.log(`❌ Lỗi kết nối tới ${node.id} (${node.url}):`, err.message);
+                console.log(` Lỗi kết nối tới ${node.id} (${node.url}):`, err.message);
                 
-                statusReport.push({ id: node.id, status: 'Offline ❌' });
+                statusReport.push({ id: node.id, status: 'Offline ' });
             }
         }
 
@@ -301,6 +301,7 @@ const patientController = {
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
+
 }
 
 }
