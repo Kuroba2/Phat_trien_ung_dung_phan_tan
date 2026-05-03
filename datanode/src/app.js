@@ -35,6 +35,10 @@ app.use(express.json());
 app.get('/ping', (req, res) => {
   res.status(200).send('pong');
 });
+
+app.get('/ping', (req, res) => {
+  res.status(200).send('pong');
+});
 app.get("/health", (_req, res) => {
   res.status(200).json({
     status: "up",
@@ -44,7 +48,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.use("/api/patients", patientRoutes);
+app.use("/api", patientRoutes);
 app.use("/api/replication", buildReplicationRoutes(replicationController));
 
 
