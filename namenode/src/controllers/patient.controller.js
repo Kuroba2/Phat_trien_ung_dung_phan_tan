@@ -120,6 +120,7 @@ const patientController = {
 
             // 2. Gửi yêu cầu tìm kiếm song song
             const requests = nodeList.map(node =>
+
                 axios.get(`${node}/api/search?name=${encodeURIComponent(name)}`, {
                     timeout: 5000,
                     headers: { 'ngrok-skip-browser-warning': 'true' }
@@ -246,7 +247,7 @@ const patientController = {
                 { id: 'DataNode_3', url: 'https://harmonica-defuse-tapping.ngrok-free.dev' }
             ];
 
-            const statusReport = [];
+        const statusReport = [];
 
             for (let node of nodes) {
                 try {
@@ -266,14 +267,6 @@ const patientController = {
                     statusReport.push({ id: node.id, status: 'Offline ' });
                 }
             }
-
-            res.json({
-                system: "Hệ thống lưu trữ phân tán",
-                timestamp: new Date().toLocaleString(),
-                nodes: statusReport
-            });
-        } catch (error) {
-            res.status(500).json({ error: error.message });
         }
 
     },
@@ -380,6 +373,8 @@ const patientController = {
             res.status(500).json({ error: "Lỗi luồng xóa", detail: error.message });
         }
     }
+
+}
 
 }
 
