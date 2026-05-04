@@ -247,7 +247,7 @@ const patientController = {
                 { id: 'DataNode_3', url: 'https://harmonica-defuse-tapping.ngrok-free.dev' }
             ];
 
-        const statusReport = [];
+            const statusReport = [];
 
             for (let node of nodes) {
                 try {
@@ -267,6 +267,12 @@ const patientController = {
                     statusReport.push({ id: node.id, status: 'Offline ' });
                 }
             }
+            // Trả về báo cáo trạng thái
+            return res.json(statusReport);
+
+        } catch (err) {
+            console.error('Lỗi kiểm tra trạng thái hệ thống:', err.message);
+            return res.status(500).json({ error: 'Lỗi kiểm tra trạng thái hệ thống', detail: err.message });
         }
 
     },
@@ -376,6 +382,6 @@ const patientController = {
 
 }
 
-}
+
 
 module.exports = patientController;
