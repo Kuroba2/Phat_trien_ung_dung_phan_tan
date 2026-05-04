@@ -1,4 +1,5 @@
 const axios = require("axios");
+const replicationService = require('...')
 
 const patientController = (dbService, replicationService) => ({
     // Lưu xong tự động đẩy sang máy tiếp theo trong chuỗi
@@ -55,7 +56,7 @@ const patientController = (dbService, replicationService) => ({
                 message: (is_primary && replica_url)
                     ? "Hệ thống đã lưu thành công trên cả chuỗi Chính & Phụ!"
                     : "DataNode đã lưu dữ liệu thành công!",
-                patient_id:patientData.patient_id
+                patient_id: patientData.patient_id
             });
 
         } catch (err) {
@@ -83,6 +84,85 @@ const patientController = (dbService, replicationService) => ({
             return res.json(patients);
         } catch (err) {
             return res.status(500).json({ error: err.message });
+        }
+    },
+
+
+    updatePatient: async (req, res) => {
+        try {
+            const id = req.query.id;
+
+            // 1. TÁCH REPLICA_URL RA KHỎI DỮ LIỆU UPDATE
+            // Dấu ...updateData sẽ gom tất cả các trường còn lại (name, age...) vào 1 biến sạch
+            const { replica_url, ...updateData } = req.body;
+
+            if (!id) return res.status(400).json({ error: "Thiếu ID" });
+
+            // 2. Máy Chính tự Update bằng cục dữ liệu ĐÃ LÀM SẠCH
+            await dbService.updatePatient(id, updateData);
+
+            // 3. Chuyển tiếp sang Máy Phụ (Nếu có)
+            let replicaStatus = "Không có máy Phụ";
+            if (replica_url) {
+                try {
+                    // CHỈ GỬI ĐI updateData SẠCH (Không còn chứa replica_url bên trong nữa)
+                    const targetUrl = `${replica_url}/api/update-patient?id=${id}`;
+                    await replicationService.replicateWithRetry(targetUrl, 'PUT', updateData);
+                } catch (err) {
+                    console.warn(`[CẢNH BÁO] Replica sập, đã đưa vào hàng đợi Sync Service: ${err.message}`);
+                    isReplicaSuccess = false; // Đánh dấu degraded
+                }
+            }
+
+            // 4. Trả kết quả
+            res.json({
+                message: "DataNode Chính: Cập nhật thành công!",
+                replica_success: isReplicaSuccess
+            });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
+        }
+    },
+
+    // TRONG patient.controller.js CỦA DATANODE
+
+    // TRONG patient.controller.js CỦA DATANODE
+
+    deletePatient: async (req, res) => {
+        try {
+            const id = req.query.id;
+            const replica_url = req.query.replica_url; // Lấy địa chỉ máy phụ từ query do NameNode gửi
+
+            if (!id) return res.status(400).json({ error: "Thiếu ID" });
+
+            // 1. Máy Chính tự xóa dữ liệu của nó trước
+            await dbService.deletePatient(id);
+
+            let isReplicaSuccess = true;
+
+            // 2. Chuyển tiếp lệnh xóa sang Máy Phụ thông qua Hàng đợi (Replication Service)
+            if (replica_url) {
+                try {
+                    const targetUrl = `${replica_url}/api/delete-patient?id=${id}`;
+
+                    // THAY THẾ axios.delete BẰNG replicationService
+                    // Tham số: URL, HTTP Method ('DELETE'), và Dữ liệu body (null vì delete không cần body)
+                    await replicationService.replicateWithRetry(targetUrl, 'DELETE', null);
+
+                } catch (err) {
+                    // MÁY PHỤ HỎNG: Đã được replicationService ném vào hàng đợi tự động
+                    console.warn(`[CẢNH BÁO] Replica sập khi xóa, đã đưa vào hàng đợi Sync Service: ${err.message}`);
+                    isReplicaSuccess = false; // Đánh dấu degraded
+                }
+            }
+
+            // 3. Trả báo cáo về cho NameNode bằng cờ boolean
+            res.json({
+                message: "DataNode Chính: Đã xóa bệnh nhân!",
+                replica_success: isReplicaSuccess
+            });
+        } catch (err) {
+            res.status(500).json({ error: err.message });
         }
     },
 });

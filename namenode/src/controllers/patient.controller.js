@@ -3,31 +3,6 @@ const axios = require('axios');
 let currentIndex = 0;
 
 const patientController = {
-    // getPatientUploadLocation: async (req, res) => {
-    //     const availableNodes = Object.keys(global.nodeStatus).filter(
-    //         nodeIp => global.nodeStatus[nodeIp] === 'UP'
-    //     );
-
-    //     if (availableNodes.length === 0) {
-    //         return res.status(503).json({ error: "Tất cả chi nhánh đều đang sập!" });
-    //     }
-
-    //     const primary = availableNodes[currentIndex % availableNodes.length];
-    //     currentIndex++;
-
-    //     let replica = null;
-    //     if (availableNodes.length > 1) {
-    //         const replicaIndex = (availableNodes.indexOf(primary) + 1) % availableNodes.length;
-    //         replica = availableNodes[replicaIndex];
-    //     }
-
-    //     res.json({
-    //         primary: primary,
-    //         replica: replica,
-    //         available_nodes: availableNodes.length
-    //     });
-    // },
-
 
     //tạo mới bệnh nhân (đồng thời cập nhật Metadata trên NameNode và tự động đồng bộ xuống DataNode)
     uploadPatient: async (req, res) => {
@@ -262,46 +237,149 @@ const patientController = {
         }
     },
 
-    
+
     checkSystemStatus: async (req, res) => {
-    try {
-        const nodes = [
-            { id: 'DataNode_1', url: 'https://thinning-recount-bondless.ngrok-free.dev' },
-            { id: 'DataNode_2', url: 'https://cusp-broadly-smooth.ngrok-free.dev' },
-            { id: 'DataNode_3', url: 'https://harmonica-defuse-tapping.ngrok-free.dev' }
-        ];
+        try {
+            const nodes = [
+                { id: 'DataNode_1', url: 'https://thinning-recount-bondless.ngrok-free.dev' },
+                { id: 'DataNode_2', url: 'https://cusp-broadly-smooth.ngrok-free.dev' },
+                { id: 'DataNode_3', url: 'https://harmonica-defuse-tapping.ngrok-free.dev' }
+            ];
 
-        const statusReport = [];
+            const statusReport = [];
 
-        for (let node of nodes) {
-            try {
-                // Gửi yêu cầu kèm theo header để vượt qua ngrok
-                await axios.get(`${node.url}/ping`, {
-                    timeout: 5000, // Tăng lên 5s cho chắc chắn
-                    headers: {
-                        'ngrok-skip-browser-warning': 'true',
-                        'User-Agent': 'axios' 
-                    }
-                });
-                statusReport.push({ id: node.id, status: 'Online ' });
-            } catch (err) {
-                // QUAN TRỌNG: Dòng này sẽ hiện lỗi thật sự lên Terminal của NameNode
-                console.log(` Lỗi kết nối tới ${node.id} (${node.url}):`, err.message);
-                
-                statusReport.push({ id: node.id, status: 'Offline ' });
+            for (let node of nodes) {
+                try {
+                    // Gửi yêu cầu kèm theo header để vượt qua ngrok
+                    await axios.get(`${node.url}/ping`, {
+                        timeout: 5000, // Tăng lên 5s cho chắc chắn
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true',
+                            'User-Agent': 'axios'
+                        }
+                    });
+                    statusReport.push({ id: node.id, status: 'Online ' });
+                } catch (err) {
+                    // QUAN TRỌNG: Dòng này sẽ hiện lỗi thật sự lên Terminal của NameNode
+                    console.log(` Lỗi kết nối tới ${node.id} (${node.url}):`, err.message);
+
+                    statusReport.push({ id: node.id, status: 'Offline ' });
+                }
             }
+
+            res.json({
+                system: "Hệ thống lưu trữ phân tán",
+                timestamp: new Date().toLocaleString(),
+                nodes: statusReport
+            });
+        } catch (error) {
+            res.status(500).json({ error: error.message });
         }
 
-        res.json({
-            system: "Hệ thống lưu trữ phân tán",
-            timestamp: new Date().toLocaleString(),
-            nodes: statusReport
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+    },
 
-}
+
+
+    updatePatient: async (req, res) => {
+        const { patient_id } = req.params;
+        const updateData = req.body;
+
+        try {
+            const pool = await poolPromise;
+            const result = await pool.request()
+                .input('id', sql.VarChar, patient_id)
+                .query("SELECT * FROM dbo.metadata WHERE patient_id = @id");
+
+            const meta = result.recordset[0];
+            if (!meta) return res.status(404).json({ error: "Không tìm thấy Metadata" });
+
+            const primaryUrl = meta.primary_node ? meta.primary_node.replace(/\/$/, "") : null;
+            const replicaUrl = meta.replica_node ? meta.replica_node.replace(/\/$/, "") : null;
+
+            if (!primaryUrl) return res.status(500).json({ error: "Không có máy Chính" });
+
+            // Gói địa chỉ máy phụ vào body để máy Chính gọi
+            const payload = {
+                ...updateData,
+                replica_url: replicaUrl
+            };
+
+            // CHỈ GỌI MÁY CHÍNH
+            const response = await axios.put(`${primaryUrl}/api/update-patient?id=${patient_id}`, payload);
+            const { replica_success } = response.data;
+
+            // XỬ LÝ KẾT QUẢ TỪ MÁY CHÍNH BÁO VỀ
+            if (replica_success === false) {
+                console.warn(`[DEGRADED] NameNode ghi nhận: Máy Phụ (${replicaUrl}) đang bị lỗi đồng bộ cho BN ${patient_id}. Đã đưa vào hàng đợi DataNode.`);
+                // Nếu bảng metadata của Huy có cột trạng thái (ví dụ: status), Huy có thể Update nó thành 'DEGRADED' ở đây.
+            }
+            // Cập nhật Metadata tại NameNode
+            await pool.request()
+                .input('id', sql.VarChar, patient_id)
+                .input('now', sql.DateTime, new Date())
+                .query("UPDATE dbo.metadata SET updated_at = @now WHERE patient_id = @id");
+
+            res.status(200).json({
+                message: "Hoàn tất luồng NameNode -> Primary -> Replica",
+                detail: response.data
+            });
+
+        } catch (error) {
+            res.status(500).json({ error: "Lỗi luồng cập nhật", detail: error.message });
+        }
+    },
+
+
+
+    // TRONG patient.controller.js CỦA NAMENODE
+
+    deletePatient: async (req, res) => {
+        const { patient_id } = req.params;
+
+        try {
+            // 1. Tìm thông tin Metadata
+            const pool = await poolPromise;
+            const result = await pool.request()
+                .input('id', sql.VarChar, patient_id)
+                .query("SELECT * FROM dbo.metadata WHERE patient_id = @id");
+
+            const meta = result.recordset[0];
+            if (!meta) return res.status(404).json({ error: "Bệnh nhân không tồn tại" });
+
+            const primaryUrl = meta.primary_node ? meta.primary_node.replace(/\/$/, "") : null;
+            const replicaUrl = meta.replica_node ? meta.replica_node.replace(/\/$/, "") : null;
+
+            if (!primaryUrl) return res.status(500).json({ error: "Không xác định được máy Chính" });
+
+            // 2. GỌI MÁY CHÍNH (Gắn kèm URL máy phụ vào Query)
+            // Nếu có máy phụ, ta truyền nó vào biến replica_url. Nhớ dùng encodeURIComponent để URL không bị gãy.
+            let targetUrl = `${primaryUrl}/api/delete-patient?id=${patient_id}`;
+            if (replicaUrl) {
+                targetUrl += `&replica_url=${encodeURIComponent(replicaUrl)}`;
+            }
+
+            // 3. Thực hiện gọi tới Máy Chính
+            const response = await axios.delete(targetUrl);
+            // 4. Kiểm tra trạng thái xóa ở Máy Phụ do Máy Chính báo về
+            const { replica_success } = response.data;
+
+            if (replica_success === false) {
+                console.warn(`[DEGRADED] NameNode ghi nhận: Máy Phụ (${replicaUrl}) sập khi xóa BN ${patient_id}. Lệnh xóa đã được đẩy vào hàng đợi tự động.`);
+            }
+            // 5. Xóa Metadata tại NameNode (Chỉ thực hiện khi máy Chính báo thành công)
+            await pool.request()
+                .input('id', sql.VarChar, patient_id)
+                .query("DELETE FROM dbo.metadata WHERE patient_id = @id");
+            // 6. Phản hồi cho người dùng
+            res.status(200).json({
+                message: "Hoàn tất luồng xóa: NameNode -> Primary -> Replica",
+                detail: response.data
+            });
+
+        } catch (error) {
+            res.status(500).json({ error: "Lỗi luồng xóa", detail: error.message });
+        }
+    }
 
 }
 

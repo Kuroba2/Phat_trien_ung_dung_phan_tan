@@ -3,12 +3,16 @@ const router = express.Router();
 const patientController = require('../controllers/patient.controller');
 
 //router.get('/upload-location', patientController.getPatientUploadLocation);
-router.get('/status', patientController.checkSystemStatus);
+router.get('/status', patientController.checkSystemStatus);// check system status
 
-router.post('/upload', patientController.uploadPatient);
+router.post('/patients', patientController.uploadPatient);// upload patient data
 
-router.get('/search', patientController.searchPatient);
+router.get('/patients/search', patientController.searchPatient);// search patients by name or other criteria
 
-router.get('/:patient_id', patientController.getPatientById);
+router.get('/patients/:patient_id', patientController.getPatientById);// get patient details by ID
+
+router.put('/patients/:patient_id', patientController.updatePatient);
+
+router.delete('/patients/:patient_id', patientController.deletePatient);
 
 module.exports = router;
