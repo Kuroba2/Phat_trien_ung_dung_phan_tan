@@ -1,5 +1,5 @@
 const axios = require("axios");
-const replicationService = require('...')
+
 
 const patientController = (dbService, replicationService) => ({
     // Lưu xong tự động đẩy sang máy tiếp theo trong chuỗi
@@ -102,7 +102,7 @@ const patientController = (dbService, replicationService) => ({
             await dbService.updatePatient(id, updateData);
 
             // 3. Chuyển tiếp sang Máy Phụ (Nếu có)
-            let replicaStatus = "Không có máy Phụ";
+            let isReplicaSuccess = true;
             if (replica_url) {
                 try {
                     // CHỈ GỬI ĐI updateData SẠCH (Không còn chứa replica_url bên trong nữa)
