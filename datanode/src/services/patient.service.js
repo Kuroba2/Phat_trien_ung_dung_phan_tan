@@ -74,7 +74,7 @@ async function getPatientById(id) {
 
 async function searchByName(name) {
 	const pool = await getPool();
-	const keyword = `${name || ''}%`;
+	const keyword = `%${name || ''}%`;
 
 	const result = await pool
 		.request()

@@ -44,7 +44,7 @@ async function sinhBenhNhan() {
         await new Promise(r => setTimeout(r, 100));
     }
 
-    console.log("\n Hoàn tất! Huy kiểm tra bảng Metadata trong SQL để thấy kết quả.");
+    console.log("\n Hoàn tất! Kiểm tra bảng Metadata trong SQL để thấy kết quả.");
 }
 
 sinhBenhNhan();

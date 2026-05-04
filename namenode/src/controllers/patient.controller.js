@@ -145,7 +145,6 @@ const patientController = {
 
             // 2. Gửi yêu cầu tìm kiếm song song
             const requests = nodeList.map(node =>
-                // NHỚ: Thêm /patients/ vào đường dẫn cho khớp với DataNode
                 axios.get(`${node}/api/search?name=${encodeURIComponent(name)}`, {
                     timeout: 5000,
                     headers: { 'ngrok-skip-browser-warning': 'true' }
@@ -284,12 +283,12 @@ const patientController = {
                         'User-Agent': 'axios' 
                     }
                 });
-                statusReport.push({ id: node.id, status: 'Online ✅' });
+                statusReport.push({ id: node.id, status: 'Online ' });
             } catch (err) {
                 // QUAN TRỌNG: Dòng này sẽ hiện lỗi thật sự lên Terminal của NameNode
-                console.log(`❌ Lỗi kết nối tới ${node.id} (${node.url}):`, err.message);
+                console.log(` Lỗi kết nối tới ${node.id} (${node.url}):`, err.message);
                 
-                statusReport.push({ id: node.id, status: 'Offline ❌' });
+                statusReport.push({ id: node.id, status: 'Offline ' });
             }
         }
 
