@@ -304,8 +304,18 @@ const patientController = {
             };
 
             // CHỈ GỌI MÁY CHÍNH
-            const response = await axios.put(`${primaryUrl}/api/update-patient?id=${patient_id}`, payload);
-            const { replica_success } = response.data;
+            const response = await axios.put(
+                `${primaryUrl}/api/update-patient?id=${patient_id}`,
+                payload,
+                {
+                    timeout: 10000,
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true',
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                }
+            ); const { replica_success } = response.data;
 
             // XỬ LÝ KẾT QUẢ TỪ MÁY CHÍNH BÁO VỀ
             if (replica_success === false) {
@@ -358,8 +368,14 @@ const patientController = {
             }
 
             // 3. Thực hiện gọi tới Máy Chính
-            const response = await axios.delete(targetUrl);
-            // 4. Kiểm tra trạng thái xóa ở Máy Phụ do Máy Chính báo về
+            const response = await axios.delete(targetUrl, {
+                timeout: 10000,
+                headers: {
+                    'ngrok-skip-browser-warning': 'true',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });            // 4. Kiểm tra trạng thái xóa ở Máy Phụ do Máy Chính báo về
             const { replica_success } = response.data;
 
             if (replica_success === false) {

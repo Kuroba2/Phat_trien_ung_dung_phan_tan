@@ -105,9 +105,21 @@ const patientController = (dbService, replicationService) => ({
             let isReplicaSuccess = true;
             if (replica_url) {
                 try {
-                    // CHỈ GỬI ĐI updateData SẠCH (Không còn chứa replica_url bên trong nữa)
-                    const targetUrl = `${replica_url}/api/update-patient?id=${id}`;
-                    await replicationService.replicateWithRetry(targetUrl, 'PUT', updateData);
+                    // 1. Dọn dẹp URL và nối đúng đường dẫn mà DataNode đang mở (update-patient)
+                    const cleanUrl = replica_url.replace(/\/$/, "");
+                    const targetUrl = `${cleanUrl}/api/update-patient?id=${id}`;
+
+                    console.log(` Đang chuyển tiếp lệnh Update sang máy phụ: ${targetUrl}`);
+
+                    // 2. Gọi Axios với đầy đủ header "thông hành" qua Ngrok
+                    await axios.put(targetUrl, updateData, {
+                        timeout: 10000,
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true', // BẮT BUỘC để không bị Ngrok chặn
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        }
+                    });
                 } catch (err) {
                     console.warn(`[CẢNH BÁO] Replica sập, đã đưa vào hàng đợi Sync Service: ${err.message}`);
                     isReplicaSuccess = false; // Đánh dấu degraded
@@ -143,11 +155,21 @@ const patientController = (dbService, replicationService) => ({
             // 2. Chuyển tiếp lệnh xóa sang Máy Phụ thông qua Hàng đợi (Replication Service)
             if (replica_url) {
                 try {
-                    const targetUrl = `${replica_url}/api/delete-patient?id=${id}`;
+                    // 1. Dọn dẹp URL và nối đúng route /delete-patient của DataNode
+                    const cleanUrl = replica_url.replace(/\/$/, "");
+                    const targetUrl = `${cleanUrl}/api/delete-patient?id=${id}`;
 
-                    // THAY THẾ axios.delete BẰNG replicationService
-                    // Tham số: URL, HTTP Method ('DELETE'), và Dữ liệu body (null vì delete không cần body)
-                    await replicationService.replicateWithRetry(targetUrl, 'DELETE', null);
+                    console.log(`[PIPELINE] Đang gửi lệnh XÓA sang máy phụ: ${targetUrl}`);
+
+                    // 2. Sử dụng axios.delete với Header vượt rào Ngrok
+                    await axios.delete(targetUrl, {
+                        timeout: 10000,
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true', // BẮT BUỘC để không bị Ngrok chặn
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        }
+                    });
 
                 } catch (err) {
                     // MÁY PHỤ HỎNG: Đã được replicationService ném vào hàng đợi tự động
