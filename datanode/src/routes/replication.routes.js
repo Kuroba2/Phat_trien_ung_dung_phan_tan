@@ -5,7 +5,8 @@ function buildReplicationRoutes(replicationController) {
 
   router.post("/replicate", replicationController.replicate);
   router.post("/internal/sync", replicationController.syncNow);
-
+  router.get("/degraded-list", replicationController.listDegraded);
+  
   return router;
 }
 

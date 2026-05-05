@@ -1,3 +1,4 @@
+const { markDegradedReplication } = require("../services/replication.store");
 const axios = require("axios");
 
 
@@ -121,8 +122,27 @@ const patientController = (dbService, replicationService) => ({
                         }
                     });
                 } catch (err) {
-                    console.warn(`[CẢNH BÁO] Replica sập, đã đưa vào hàng đợi Sync Service: ${err.message}`);
-                    isReplicaSuccess = false; // Đánh dấu degraded
+                    console.warn(`[CẢNH BÁO] Replica sập: ${err.message}`);
+                    isReplicaSuccess = false;
+
+                    // Lấy record vừa update để có đủ dữ liệu queue
+                    const updated = await dbService.getPatientById(id);
+
+                    markDegradedReplication({
+                        patient_id: id,
+                        primary_node: process.env.NODE_URL || null,
+                        replica_node: replica_url,
+                        operation: "UPDATE",
+                        payload: updated ? {
+                            patient_id: updated.patient_id,
+                            name: updated.name,
+                            symptom: updated.symptom,
+                            facility: updated.facility,
+                            version: updated.version,
+                            is_primary: false
+                        } : updateData,
+                        reason: err.message
+                    });
                 }
             }
 
@@ -136,9 +156,6 @@ const patientController = (dbService, replicationService) => ({
         }
     },
 
-    // TRONG patient.controller.js CỦA DATANODE
-
-    // TRONG patient.controller.js CỦA DATANODE
 
     deletePatient: async (req, res) => {
         try {
@@ -172,9 +189,17 @@ const patientController = (dbService, replicationService) => ({
                     });
 
                 } catch (err) {
-                    // MÁY PHỤ HỎNG: Đã được replicationService ném vào hàng đợi tự động
                     console.warn(`[CẢNH BÁO] Replica sập khi xóa, đã đưa vào hàng đợi Sync Service: ${err.message}`);
-                    isReplicaSuccess = false; // Đánh dấu degraded
+                    isReplicaSuccess = false;
+
+                    markDegradedReplication({
+                        patient_id: id,
+                        primary_node: process.env.NODE_URL || null,
+                        replica_node: replica_url,
+                        operation: "DELETE",
+                        payload: { patient_id: id }, // có thể để tối thiểu như này
+                        reason: err.message
+                    });
                 }
             }
 
