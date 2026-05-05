@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 
-const URL = 'http://localhost:4000/api/upload'; 
+const URL = 'http://localhost:4000/api/patients';
 
 // Các mảng dữ liệu mẫu để trộn cho phong phú
 const names = ["Nguyễn Văn", "Trần Thị", "Lê Văn", "Phạm Minh", "Hoàng Thu"];

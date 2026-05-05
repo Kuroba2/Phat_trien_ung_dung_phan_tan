@@ -7,7 +7,7 @@ function normalizePatientData(data) {
 		name: data.name,
 		symptom: data.symptom,
 		facility: data.facility,
-		is_primary: data.is_primary !== undefined ? data.is_primary : (data.isPrimary ?? true),
+		is_primary: data.is_primary !== undefined ? data.is_primary : data.isPrimary,
 		version: data.version ?? 1
 	};
 }
@@ -98,6 +98,10 @@ async function searchByName(name) {
 
 async function updatePatient(id, data) {
 	const normalized = normalizePatientData({ ...data, patient_id: id });
+	const existing = await getPatientById(id);
+	if (!existing) return null;
+	const nextIsPrimary =
+		normalized.is_primary !== undefined ? normalized.is_primary : existing.is_primary;
 	const pool = await getPool();
 
 	const request = pool.request();
@@ -105,7 +109,7 @@ async function updatePatient(id, data) {
 	request.input('name', sql.NVarChar(255), normalized.name);
 	request.input('symptom', sql.NVarChar(1000), normalized.symptom || null);
 	request.input('facility', sql.VarChar(50), normalized.facility);
-	request.input('is_primary', sql.Bit, normalized.is_primary);
+	request.input('is_primary', sql.Bit, nextIsPrimary);
 	request.input('version', sql.Int, normalized.version);
 
 	const result = await request.query(`
@@ -114,7 +118,7 @@ async function updatePatient(id, data) {
 			name = @name,
 			symptom = @symptom,
 			facility = @facility,
-			is_primary = @is_primary,
+			is_primary = COALESCE(@is_primary, is_primary),
 			version = @version
 		OUTPUT INSERTED.patient_id, INSERTED.name, INSERTED.symptom, INSERTED.facility,
 			INSERTED.is_primary, INSERTED.created_at, INSERTED.version
