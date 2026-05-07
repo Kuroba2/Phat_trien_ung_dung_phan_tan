@@ -4,6 +4,15 @@ let currentIndex = 0;
 
 const patientController = {
 
+    getPrimaryNodes: async () => {
+        const pool = await poolPromise;
+        const nodesResult = await pool.request().query("SELECT DISTINCT primary_node FROM dbo.metadata WHERE primary_node IS NOT NULL");
+
+        return nodesResult.recordset
+            .map(node => node.primary_node?.replace(/\/$/, ""))
+            .filter(Boolean);
+    },
+
     //tạo mới bệnh nhân (đồng thời cập nhật Metadata trên NameNode và tự động đồng bộ xuống DataNode)
     uploadPatient: async (req, res) => {
         const { patient_id, name, symptom, facility } = req.body;
@@ -29,28 +38,45 @@ const patientController = {
                 return res.status(503).json({ error: "Service Unavailable", message: "Không có DataNode nào online!" });
             }
 
-            // Ưu tiên chọn máy nhẹ tải (Random hoặc Round Robin đơn giản)
-            aliveNodes.sort(() => Math.random() - 0.5);
+
+            // Ưu tiên chọn máy nhẹ tải (dựa trên degraded queue length)
+            const normalize = u => u ? u.replace(/\/$/, "") : u;
+            const nodesWithLoad = aliveNodes.map(u => ({
+                url: u,
+                load: (global.nodeLoad && global.nodeLoad[normalize(u)] !== undefined)
+                    ? global.nodeLoad[normalize(u)]
+                    : Number.POSITIVE_INFINITY
+            }));
+
+            // Nếu không có load info cho bất kỳ node nào, fallback random
+            const haveLoad = nodesWithLoad.some(n => isFinite(n.load));
+            if (!haveLoad) {
+                nodesWithLoad.sort(() => Math.random() - 0.5);
+            } else {
+                // Sắp xếp theo load tăng dần (nhẹ tải trước)
+                nodesWithLoad.sort((a, b) => a.load - b.load);
+            }
 
             let primaryNode = null;
             let replicaNode = null;
             let logs = [];
 
             // --- BƯỚC 3: GỬI XUỐNG DATANODE (THỰC THI TRƯỚC) ---
-            //Tầng 2 gửi dữ liệu xuống
             // 3.1 Tìm và ghi máy Chính (Primary)
-            for (let i = 0; i < aliveNodes.length; i++) {
+            for (let i = 0; i < nodesWithLoad.length; i++) {
                 try {
-                    const targetUrl = aliveNodes[i].replace(/\/$/, "");
+                    const targetUrl = nodesWithLoad[i].url.replace(/\/$/, "");
+                    const nodeLoad = nodesWithLoad[i].load;
+                    console.log(` Thử Primary tại ${targetUrl} (load: ${isFinite(nodeLoad) ? nodeLoad : 'unknown'})`);
                     await axios.post(`${targetUrl}/api/upload-patient`,
                         { ...patientData, is_primary: 1 },
                         { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
                     );
-                    primaryNode = aliveNodes[i];
-                    aliveNodes.splice(i, 1); // Đã chọn xong thì loại khỏi danh sách chờ cho máy phụ
+                    primaryNode = nodesWithLoad[i].url;
+                    nodesWithLoad.splice(i, 1); // loại khỏi danh sách cho replica
                     break;
                 } catch (err) {
-                    logs.push(`Thử Primary tại ${aliveNodes[i]} thất bại: ${err.message}`);
+                    logs.push(`Thử Primary tại ${nodesWithLoad[i].url} thất bại: ${err.message}`);
                 }
             }
 
@@ -58,18 +84,21 @@ const patientController = {
                 return res.status(500).json({ error: "Write Failed", message: "Tất cả các máy đều từ chối ghi dữ liệu!", logs });
             }
 
-            // 3.2 Tìm và ghi máy Phụ (Replica) - Nếu còn máy khác sống
-            for (let i = 0; i < aliveNodes.length; i++) {
+            // 3.2 Tìm và ghi máy Phụ (Replica) - chọn từ các node ít tải nhất còn lại
+            // Chọn Replica từ nodesWithLoad còn lại (ít tải nhất)
+            for (let i = 0; i < nodesWithLoad.length; i++) {
                 try {
-                    const targetUrl = aliveNodes[i].replace(/\/$/, "");
+                    const targetUrl = nodesWithLoad[i].url.replace(/\/$/, "");
+                    const nodeLoad = nodesWithLoad[i].load;
+                    console.log(` Thử Replica tại ${targetUrl} (load: ${isFinite(nodeLoad) ? nodeLoad : 'unknown'})`);
                     await axios.post(`${targetUrl}/api/upload-patient`,
                         { ...patientData, is_primary: 0 },
                         { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
                     );
-                    replicaNode = aliveNodes[i];
+                    replicaNode = nodesWithLoad[i].url;
                     break;
                 } catch (err) {
-                    logs.push(`Thử Replica tại ${aliveNodes[i]} thất bại, đang tìm máy tiếp theo...`);
+                    logs.push(`Thử Replica tại ${nodesWithLoad[i].url} thất bại, đang tìm máy tiếp theo...`);
                 }
             }
 
@@ -110,11 +139,7 @@ const patientController = {
             console.log(` NameNode đang phát lệnh tìm kiếm tên: ${name}`);
 
             // 1. Lấy danh sách các máy DataNode từ DB Metadata (Cách này chắc chắn hơn global variable)
-            const pool = await poolPromise;
-            const nodesResult = await pool.request().query("SELECT DISTINCT primary_node FROM dbo.metadata");
-
-            // Chuyển thành mảng các URL sạch (không có dấu / ở cuối)
-            const nodeList = nodesResult.recordset.map(n => n.primary_node.replace(/\/$/, ""));
+            const nodeList = await patientController.getPrimaryNodes();
 
             if (nodeList.length === 0) return res.json([]);
 
@@ -152,6 +177,62 @@ const patientController = {
         } catch (err) {
             console.error(" Lỗi Search:", err.message);
             res.status(500).json({ error: "Lỗi thực hiện truy vấn phân tán: " + err.message });
+        }
+    },
+
+    getTodayPatientStats: async (req, res) => {
+        try {
+            const nodeList = await patientController.getPrimaryNodes();
+
+            if (nodeList.length === 0) {
+                return res.json({
+                    total_today: 0,
+                    query_date_utc: new Date().toISOString().slice(0, 10),
+                    per_node: [],
+                    unavailable_nodes: []
+                });
+            }
+
+            const requests = nodeList.map(node =>
+                axios.get(`${node}/api/stats/today`, {
+                    timeout: 5000,
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                })
+            );
+
+            const results = await Promise.allSettled(requests);
+
+            let totalToday = 0;
+            const perNode = [];
+            const unavailableNodes = [];
+
+            results.forEach((result, index) => {
+                const nodeUrl = nodeList[index];
+
+                if (result.status === 'fulfilled') {
+                    const total = Number(result.value.data?.total || 0);
+                    totalToday += total;
+                    perNode.push({
+                        node: nodeUrl,
+                        total
+                    });
+                } else {
+                    unavailableNodes.push({
+                        node: nodeUrl,
+                        error: result.reason.message
+                    });
+                }
+            });
+
+            return res.json({
+                total_today: totalToday,
+                query_date_utc: new Date().toISOString().slice(0, 10),
+                per_node: perNode,
+                unavailable_nodes: unavailableNodes
+            });
+        } catch (err) {
+            console.error(" Lỗi thống kê hôm nay:", err.message);
+            res.status(500).json({ error: "Lỗi thống kê phân tán: " + err.message });
         }
     },
 

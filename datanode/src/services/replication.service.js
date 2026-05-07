@@ -27,10 +27,14 @@ function createReplicationService(config) {
   }
 
   async function replicateToNode({ targetNodeUrl, data }) {
-    const endpoint = `${targetNodeUrl}/replicate`;
+    const endpoint = `${targetNodeUrl}/api/replication/replicate`;  
     return fetchJson(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "ngrok-skip-browser-warning": "true"  
+      },
       body: JSON.stringify(data),
       signal: AbortSignal.timeout(config.replicationTimeoutMs),
     });

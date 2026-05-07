@@ -9,6 +9,8 @@ router.post('/patients', patientController.uploadPatient);// upload patient data
 
 router.get('/patients/search', patientController.searchPatient);// search patients by name or other criteria
 
+router.get('/patients/stats/today', patientController.getTodayPatientStats);
+
 router.get('/patients/:patient_id', patientController.getPatientById);// get patient details by ID
 
 router.put('/patients/:patient_id', patientController.updatePatient);

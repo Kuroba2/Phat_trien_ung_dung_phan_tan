@@ -4,10 +4,10 @@ const path = require('path');
 require('dotenv').config();
 
 const app = express();
-app.use(express.json()); 
+app.use(express.json());
 
 const apiRoutes = require('./routes/api');
-app.use('/api', apiRoutes); 
+app.use('/api', apiRoutes);
 
 const dataNodes = [
     process.env.DATANODE_1,
@@ -21,29 +21,58 @@ global.nodeStatus = {
     [dataNodes[2]]: 'UP'
 };
 
+const nodePrevStatus = {};
+const lastSyncTrigger = {};
+const SYNC_COOLDOWN_MS = 2 * 60 * 1000; // 2 phút
+
+// khởi tạo prev map (chuẩn hoá)
+for (const n of dataNodes) {
+    if (!n) continue;
+    const key = n.endsWith('/') ? n.slice(0, -1) : n;
+    nodePrevStatus[key] = global.nodeStatus[n] || 'UNKNOWN';
+}  //  LƯU TRẠNG THÁI CŨ
+
 setInterval(async () => {
-    for (let node of dataNodes) {
-        if (!node) continue;
-        
-        // 1. Xử lý xóa dấu "/" ở cuối link nếu có để tránh lỗi //health
-        const baseUrl = node.endsWith('/') ? node.slice(0, -1) : node;
+    for (let rawNode of dataNodes) {
+        if (!rawNode) continue;
+        const baseUrl = rawNode.endsWith('/') ? rawNode.slice(0, -1) : rawNode;
         const healthUrl = `${baseUrl}/health`;
+        let current = 'DOWN';
 
         try {
-            // 2. Thêm header ngrok-skip-browser-warning để axios đi thẳng vào code
-            await axios.get(healthUrl, { 
-                timeout: 5000, // Tăng lên 5s cho chắc vì mạng ngrok đôi khi chậm
-                headers: { 'ngrok-skip-browser-warning': 'true' } 
-            });
-            
-            global.nodeStatus[node] = 'UP';
+                const resp = await axios.get(healthUrl, {
+                    timeout: 5000,
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                });
+                current = 'UP';
 
-            console.log(` Node ${node} is ONLINE`); 
-            
-        } catch (error) {
-            global.nodeStatus[node] = 'DOWN';
-            console.log(`⚠️ Warning: Node ${healthUrl} is unreachable. Error: ${error.message}`);
-        }
+                // Lưu load từ health response
+                if (resp.data && typeof resp.data.load === 'number') {
+                    global.nodeLoad = global.nodeLoad || {};
+                    global.nodeLoad[baseUrl] = resp.data.load;
+                }
+                // nếu health trả load, lưu luôn: global.nodeLoad[baseUrl] = resp.data.load || 0;
+            } catch {
+                current = 'DOWN';
+                global.nodeLoad = global.nodeLoad || {};
+                global.nodeLoad[baseUrl] = Infinity;
+            }
+
+            const prev = nodePrevStatus[baseUrl] || 'UNKNOWN';
+            // Trigger only when prev was DOWN and now UP, and respect cooldown
+            if (prev === 'DOWN' && current === 'UP') {
+                const now = Date.now();
+                if (!lastSyncTrigger[baseUrl] || (now - lastSyncTrigger[baseUrl]) > SYNC_COOLDOWN_MS) {
+                    lastSyncTrigger[baseUrl] = now;
+                    console.log(` Node ${baseUrl} vừa sống lại! Trigger sync...`);
+                    // trigger sync logic...
+                }
+            }
+
+            // update status maps
+            nodePrevStatus[baseUrl] = current;
+            global.nodeStatus[rawNode] = current;
+            console.log(` Node ${baseUrl} is ${current}`);
     }
 }, 5000);
 

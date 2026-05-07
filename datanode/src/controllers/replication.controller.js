@@ -1,4 +1,4 @@
-const { upsertReplicaRecord } = require("../services/replication.store");
+const { upsertReplicaRecord, listDegradedReplications } = require("../services/replication.store");
 const { getPool, sql } = require("../config/db");
 
 function isValidReplicationPayload(body) {
@@ -20,7 +20,6 @@ function createReplicationController({ syncService }) {
 
     try {
       const result = upsertReplicaRecord(payload);
-      
       const pool = await getPool();
       const request = pool.request();
       request.input('patient_id', sql.VarChar(20), payload.patient_id);
@@ -74,9 +73,24 @@ function createReplicationController({ syncService }) {
     }
   }
 
+  async function listDegraded(_req, res) {
+    try {
+      const queue = listDegradedReplications();
+      return res.status(200).json({
+        queue: queue
+      });
+    } catch (error) {
+      return res.status(500).json({
+        message: "Failed to list degraded replications",
+        error: error.message
+      });
+    }
+  }
+
   return {
     replicate,
     syncNow,
+    listDegraded
   };
 }
 

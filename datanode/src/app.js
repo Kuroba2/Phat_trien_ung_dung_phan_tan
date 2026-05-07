@@ -39,12 +39,19 @@ app.get('/ping', (req, res) => {
 app.get('/ping', (req, res) => {
   res.status(200).send('pong');
 });
+
+const { listDegradedReplications } = require("./services/replication.store");
 app.get("/health", (_req, res) => {
+  const load = (() => {
+    try { return listDegradedReplications().length; }
+    catch (e) { return 0; }
+  })();
   res.status(200).json({
     status: "up",
     node_id: config.nodeId,
     node_url: config.nodeUrl,
     timestamp: new Date().toISOString(),
+    load: load  
   });
 });
 
