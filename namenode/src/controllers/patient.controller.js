@@ -4,6 +4,15 @@ let currentIndex = 0;
 
 const patientController = {
 
+    getPrimaryNodes: async () => {
+        const pool = await poolPromise;
+        const nodesResult = await pool.request().query("SELECT DISTINCT primary_node FROM dbo.metadata WHERE primary_node IS NOT NULL");
+
+        return nodesResult.recordset
+            .map(node => node.primary_node?.replace(/\/$/, ""))
+            .filter(Boolean);
+    },
+
     //tạo mới bệnh nhân (đồng thời cập nhật Metadata trên NameNode và tự động đồng bộ xuống DataNode)
     uploadPatient: async (req, res) => {
         const { patient_id, name, symptom, facility } = req.body;
@@ -110,11 +119,7 @@ const patientController = {
             console.log(` NameNode đang phát lệnh tìm kiếm tên: ${name}`);
 
             // 1. Lấy danh sách các máy DataNode từ DB Metadata (Cách này chắc chắn hơn global variable)
-            const pool = await poolPromise;
-            const nodesResult = await pool.request().query("SELECT DISTINCT primary_node FROM dbo.metadata");
-
-            // Chuyển thành mảng các URL sạch (không có dấu / ở cuối)
-            const nodeList = nodesResult.recordset.map(n => n.primary_node.replace(/\/$/, ""));
+            const nodeList = await patientController.getPrimaryNodes();
 
             if (nodeList.length === 0) return res.json([]);
 
@@ -152,6 +157,62 @@ const patientController = {
         } catch (err) {
             console.error(" Lỗi Search:", err.message);
             res.status(500).json({ error: "Lỗi thực hiện truy vấn phân tán: " + err.message });
+        }
+    },
+
+    getTodayPatientStats: async (req, res) => {
+        try {
+            const nodeList = await patientController.getPrimaryNodes();
+
+            if (nodeList.length === 0) {
+                return res.json({
+                    total_today: 0,
+                    query_date_utc: new Date().toISOString().slice(0, 10),
+                    per_node: [],
+                    unavailable_nodes: []
+                });
+            }
+
+            const requests = nodeList.map(node =>
+                axios.get(`${node}/api/stats/today`, {
+                    timeout: 5000,
+                    headers: { 'ngrok-skip-browser-warning': 'true' }
+                })
+            );
+
+            const results = await Promise.allSettled(requests);
+
+            let totalToday = 0;
+            const perNode = [];
+            const unavailableNodes = [];
+
+            results.forEach((result, index) => {
+                const nodeUrl = nodeList[index];
+
+                if (result.status === 'fulfilled') {
+                    const total = Number(result.value.data?.total || 0);
+                    totalToday += total;
+                    perNode.push({
+                        node: nodeUrl,
+                        total
+                    });
+                } else {
+                    unavailableNodes.push({
+                        node: nodeUrl,
+                        error: result.reason.message
+                    });
+                }
+            });
+
+            return res.json({
+                total_today: totalToday,
+                query_date_utc: new Date().toISOString().slice(0, 10),
+                per_node: perNode,
+                unavailable_nodes: unavailableNodes
+            });
+        } catch (err) {
+            console.error(" Lỗi thống kê hôm nay:", err.message);
+            res.status(500).json({ error: "Lỗi thống kê phân tán: " + err.message });
         }
     },
 

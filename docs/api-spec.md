@@ -63,3 +63,37 @@ Manually trigger sync for records marked as degraded (failed replication before)
 }
 ```
 
+## GET `/stats/today`
+
+Used by the NameNode to aggregate today’s inserted patient count from each primary DataNode.
+
+### Response `200`
+
+```json
+{
+  "total": 12,
+  "scope": "primary_records",
+  "date_utc": "2026-05-07"
+}
+```
+
+## GET `/api/patients/stats/today`
+
+NameNode endpoint that returns the aggregated count of patient records added today across all reachable primary DataNodes.
+
+### Response `200`
+
+```json
+{
+  "total_today": 12,
+  "query_date_utc": "2026-05-07",
+  "per_node": [
+    {
+      "node": "https://example-datanode.ngrok-free.dev",
+      "total": 5
+    }
+  ],
+  "unavailable_nodes": []
+}
+```
+

@@ -87,6 +87,20 @@ const patientController = (dbService, replicationService) => ({
         }
     },
 
+    getTodayPatientStats: async (_req, res) => {
+        try {
+            const total = await dbService.countPatientsCreatedToday();
+
+            return res.json({
+                total,
+                scope: 'primary_records',
+                date_utc: new Date().toISOString().slice(0, 10)
+            });
+        } catch (err) {
+            return res.status(500).json({ error: err.message });
+        }
+    },
+
 
     updatePatient: async (req, res) => {
         try {

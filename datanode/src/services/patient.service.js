@@ -96,6 +96,22 @@ async function searchByName(name) {
 	return result.recordset;
 }
 
+async function countPatientsCreatedToday() {
+	const pool = await getPool();
+
+	const result = await pool
+		.request()
+		.query(`
+			SELECT COUNT(1) AS total
+			FROM dbo.patients
+			WHERE is_primary = 1
+				AND created_at >= CONVERT(date, SYSUTCDATETIME())
+				AND created_at < DATEADD(day, 1, CONVERT(date, SYSUTCDATETIME()));
+		`);
+
+	return result.recordset[0]?.total ?? 0;
+}
+
 async function updatePatient(id, data) {
 	const normalized = normalizePatientData({ ...data, patient_id: id });
 	const pool = await getPool();
@@ -143,6 +159,7 @@ module.exports = {
 	createPatient,
 	getPatientById,
 	searchByName,
+	countPatientsCreatedToday,
 	updatePatient,
 	deletePatient,
 };
