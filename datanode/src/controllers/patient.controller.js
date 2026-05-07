@@ -1,3 +1,4 @@
+const { markDegradedReplication } = require("../services/replication.store");
 const axios = require("axios");
 
 
@@ -119,12 +120,43 @@ const patientController = (dbService, replicationService) => ({
             let isReplicaSuccess = true;
             if (replica_url) {
                 try {
-                    // CHỈ GỬI ĐI updateData SẠCH (Không còn chứa replica_url bên trong nữa)
-                    const targetUrl = `${replica_url}/api/update-patient?id=${id}`;
-                    await replicationService.replicateWithRetry(targetUrl, 'PUT', updateData);
+                    // 1. Dọn dẹp URL và nối đúng đường dẫn mà DataNode đang mở (update-patient)
+                    const cleanUrl = replica_url.replace(/\/$/, "");
+                    const targetUrl = `${cleanUrl}/api/update-patient?id=${id}`;
+
+                    console.log(` Đang chuyển tiếp lệnh Update sang máy phụ: ${targetUrl}`);
+
+                    // 2. Gọi Axios với đầy đủ header "thông hành" qua Ngrok
+                    await axios.put(targetUrl, updateData, {
+                        timeout: 10000,
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true', // BẮT BUỘC để không bị Ngrok chặn
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        }
+                    });
                 } catch (err) {
-                    console.warn(`[CẢNH BÁO] Replica sập, đã đưa vào hàng đợi Sync Service: ${err.message}`);
-                    isReplicaSuccess = false; // Đánh dấu degraded
+                    console.warn(`[CẢNH BÁO] Replica sập: ${err.message}`);
+                    isReplicaSuccess = false;
+
+                    // Lấy record vừa update để có đủ dữ liệu queue
+                    const updated = await dbService.getPatientById(id);
+
+                    markDegradedReplication({
+                        patient_id: id,
+                        primary_node: process.env.NODE_URL || null,
+                        replica_node: replica_url,
+                        operation: "UPDATE",
+                        payload: updated ? {
+                            patient_id: updated.patient_id,
+                            name: updated.name,
+                            symptom: updated.symptom,
+                            facility: updated.facility,
+                            version: updated.version,
+                            is_primary: false
+                        } : updateData,
+                        reason: err.message
+                    });
                 }
             }
 
@@ -138,9 +170,6 @@ const patientController = (dbService, replicationService) => ({
         }
     },
 
-    // TRONG patient.controller.js CỦA DATANODE
-
-    // TRONG patient.controller.js CỦA DATANODE
 
     deletePatient: async (req, res) => {
         try {
@@ -157,16 +186,34 @@ const patientController = (dbService, replicationService) => ({
             // 2. Chuyển tiếp lệnh xóa sang Máy Phụ thông qua Hàng đợi (Replication Service)
             if (replica_url) {
                 try {
-                    const targetUrl = `${replica_url}/api/delete-patient?id=${id}`;
+                    // 1. Dọn dẹp URL và nối đúng route /delete-patient của DataNode
+                    const cleanUrl = replica_url.replace(/\/$/, "");
+                    const targetUrl = `${cleanUrl}/api/delete-patient?id=${id}`;
 
-                    // THAY THẾ axios.delete BẰNG replicationService
-                    // Tham số: URL, HTTP Method ('DELETE'), và Dữ liệu body (null vì delete không cần body)
-                    await replicationService.replicateWithRetry(targetUrl, 'DELETE', null);
+                    console.log(`[PIPELINE] Đang gửi lệnh XÓA sang máy phụ: ${targetUrl}`);
+
+                    // 2. Sử dụng axios.delete với Header vượt rào Ngrok
+                    await axios.delete(targetUrl, {
+                        timeout: 10000,
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true', // BẮT BUỘC để không bị Ngrok chặn
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        }
+                    });
 
                 } catch (err) {
-                    // MÁY PHỤ HỎNG: Đã được replicationService ném vào hàng đợi tự động
                     console.warn(`[CẢNH BÁO] Replica sập khi xóa, đã đưa vào hàng đợi Sync Service: ${err.message}`);
-                    isReplicaSuccess = false; // Đánh dấu degraded
+                    isReplicaSuccess = false;
+
+                    markDegradedReplication({
+                        patient_id: id,
+                        primary_node: process.env.NODE_URL || null,
+                        replica_node: replica_url,
+                        operation: "DELETE",
+                        payload: { patient_id: id }, // có thể để tối thiểu như này
+                        reason: err.message
+                    });
                 }
             }
 

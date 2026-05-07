@@ -38,28 +38,45 @@ const patientController = {
                 return res.status(503).json({ error: "Service Unavailable", message: "Không có DataNode nào online!" });
             }
 
-            // Ưu tiên chọn máy nhẹ tải (Random hoặc Round Robin đơn giản)
-            aliveNodes.sort(() => Math.random() - 0.5);
+
+            // Ưu tiên chọn máy nhẹ tải (dựa trên degraded queue length)
+            const normalize = u => u ? u.replace(/\/$/, "") : u;
+            const nodesWithLoad = aliveNodes.map(u => ({
+                url: u,
+                load: (global.nodeLoad && global.nodeLoad[normalize(u)] !== undefined)
+                    ? global.nodeLoad[normalize(u)]
+                    : Number.POSITIVE_INFINITY
+            }));
+
+            // Nếu không có load info cho bất kỳ node nào, fallback random
+            const haveLoad = nodesWithLoad.some(n => isFinite(n.load));
+            if (!haveLoad) {
+                nodesWithLoad.sort(() => Math.random() - 0.5);
+            } else {
+                // Sắp xếp theo load tăng dần (nhẹ tải trước)
+                nodesWithLoad.sort((a, b) => a.load - b.load);
+            }
 
             let primaryNode = null;
             let replicaNode = null;
             let logs = [];
 
             // --- BƯỚC 3: GỬI XUỐNG DATANODE (THỰC THI TRƯỚC) ---
-            //Tầng 2 gửi dữ liệu xuống
             // 3.1 Tìm và ghi máy Chính (Primary)
-            for (let i = 0; i < aliveNodes.length; i++) {
+            for (let i = 0; i < nodesWithLoad.length; i++) {
                 try {
-                    const targetUrl = aliveNodes[i].replace(/\/$/, "");
+                    const targetUrl = nodesWithLoad[i].url.replace(/\/$/, "");
+                    const nodeLoad = nodesWithLoad[i].load;
+                    console.log(` Thử Primary tại ${targetUrl} (load: ${isFinite(nodeLoad) ? nodeLoad : 'unknown'})`);
                     await axios.post(`${targetUrl}/api/upload-patient`,
                         { ...patientData, is_primary: 1 },
                         { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
                     );
-                    primaryNode = aliveNodes[i];
-                    aliveNodes.splice(i, 1); // Đã chọn xong thì loại khỏi danh sách chờ cho máy phụ
+                    primaryNode = nodesWithLoad[i].url;
+                    nodesWithLoad.splice(i, 1); // loại khỏi danh sách cho replica
                     break;
                 } catch (err) {
-                    logs.push(`Thử Primary tại ${aliveNodes[i]} thất bại: ${err.message}`);
+                    logs.push(`Thử Primary tại ${nodesWithLoad[i].url} thất bại: ${err.message}`);
                 }
             }
 
@@ -67,18 +84,21 @@ const patientController = {
                 return res.status(500).json({ error: "Write Failed", message: "Tất cả các máy đều từ chối ghi dữ liệu!", logs });
             }
 
-            // 3.2 Tìm và ghi máy Phụ (Replica) - Nếu còn máy khác sống
-            for (let i = 0; i < aliveNodes.length; i++) {
+            // 3.2 Tìm và ghi máy Phụ (Replica) - chọn từ các node ít tải nhất còn lại
+            // Chọn Replica từ nodesWithLoad còn lại (ít tải nhất)
+            for (let i = 0; i < nodesWithLoad.length; i++) {
                 try {
-                    const targetUrl = aliveNodes[i].replace(/\/$/, "");
+                    const targetUrl = nodesWithLoad[i].url.replace(/\/$/, "");
+                    const nodeLoad = nodesWithLoad[i].load;
+                    console.log(` Thử Replica tại ${targetUrl} (load: ${isFinite(nodeLoad) ? nodeLoad : 'unknown'})`);
                     await axios.post(`${targetUrl}/api/upload-patient`,
                         { ...patientData, is_primary: 0 },
                         { timeout: 5000, headers: { 'ngrok-skip-browser-warning': 'true' } }
                     );
-                    replicaNode = aliveNodes[i];
+                    replicaNode = nodesWithLoad[i].url;
                     break;
                 } catch (err) {
-                    logs.push(`Thử Replica tại ${aliveNodes[i]} thất bại, đang tìm máy tiếp theo...`);
+                    logs.push(`Thử Replica tại ${nodesWithLoad[i].url} thất bại, đang tìm máy tiếp theo...`);
                 }
             }
 
@@ -365,8 +385,18 @@ const patientController = {
             };
 
             // CHỈ GỌI MÁY CHÍNH
-            const response = await axios.put(`${primaryUrl}/api/update-patient?id=${patient_id}`, payload);
-            const { replica_success } = response.data;
+            const response = await axios.put(
+                `${primaryUrl}/api/update-patient?id=${patient_id}`,
+                payload,
+                {
+                    timeout: 10000,
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true',
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                }
+            ); const { replica_success } = response.data;
 
             // XỬ LÝ KẾT QUẢ TỪ MÁY CHÍNH BÁO VỀ
             if (replica_success === false) {
@@ -419,8 +449,14 @@ const patientController = {
             }
 
             // 3. Thực hiện gọi tới Máy Chính
-            const response = await axios.delete(targetUrl);
-            // 4. Kiểm tra trạng thái xóa ở Máy Phụ do Máy Chính báo về
+            const response = await axios.delete(targetUrl, {
+                timeout: 10000,
+                headers: {
+                    'ngrok-skip-browser-warning': 'true',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+            });            // 4. Kiểm tra trạng thái xóa ở Máy Phụ do Máy Chính báo về
             const { replica_success } = response.data;
 
             if (replica_success === false) {

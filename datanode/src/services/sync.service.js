@@ -31,13 +31,35 @@ function createSyncService({ replicationService, nodeRegistry, config }) {
         continue;
       }
 
-      const result = await replicationService.retryReplication({
-        targetNodeUrl: replicaNodeUrl,
-        data: {
-          ...entry.payload,
-          is_primary: false,
-        },
-      });
+      let result;
+
+      //  XỬ LÝ RIÊNG DELETE
+      if (entry.operation === "DELETE") {
+        try {
+          const axios = require("axios");
+          const targetUrl = `${replicaNodeUrl}/api/delete-patient?id=${entry.patient_id}`;
+          await axios.delete(targetUrl, {
+            timeout: 10000,
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            }
+          });
+          result = { ok: true, attempt: 1 };
+        } catch (error) {
+          result = { ok: false, error };
+        }
+      } else {
+        //  UPDATE: dùng retryReplication như cũ
+        result = await replicationService.retryReplication({
+          targetNodeUrl: replicaNodeUrl,
+          data: {
+            ...entry.payload,
+            is_primary: false,
+          },
+        });
+      }
 
       if (result.ok) {
         recovered += 1;
@@ -53,7 +75,7 @@ function createSyncService({ replicationService, nodeRegistry, config }) {
         details.push({
           patient_id: entry.patient_id,
           status: "recovered",
-          attempt: result.attempt,
+          attempt: result.attempt || 1,
         });
       } else {
         failed += 1;
